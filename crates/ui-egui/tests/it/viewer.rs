@@ -2315,5 +2315,13 @@ fn loupe_tool_toggles_and_magnifies_target() {
     h.run_steps(3);
     assert!(h.state().loupe.is_none());
     assert_eq!(h.state().quick_tool, pdfcraft_ui_egui::QuickTool::Select);
+
+    // Re-activating loupe and then losing the active document resets QuickTool::Loupe to Select.
+    assert!(h.state_mut().execute("view.loupe"));
+    assert_eq!(h.state().quick_tool, pdfcraft_ui_egui::QuickTool::Loupe);
+    h.state_mut().active = None;
+    h.run_steps(2);
+    assert!(h.state().loupe.is_none());
+    assert_eq!(h.state().quick_tool, pdfcraft_ui_egui::QuickTool::Select);
 }
 }
