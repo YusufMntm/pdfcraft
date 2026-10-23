@@ -165,7 +165,9 @@ impl PdfCraftApp {
 
         match (clip, self.page_clipboard.clone()) {
             (Some(c), _) => {
-                if let Err(e) = self.insert_from_clip(c, at) {
+                if let Err(e) = self.insert_from_clip(c, at)
+                    && e != "page insertion failed"
+                {
                     self.notify_fmt("Couldn't insert from clipboard: {e}", &[("e", &e)]);
                 }
             }
@@ -192,18 +194,19 @@ impl PdfCraftApp {
         };
         let bytes = created.map_err(|e| e.to_string())?;
         let page_count = self.session.page_count_of("Clipboard.pdf", &bytes).map_err(|e| e.to_string())?;
-        let chosen = self.views.get_mut(i).and_then(|view| view.insert_at.take());
         let after = self.views.get(i).and_then(|v| v.target_pages().last().copied()).map_or(0, |p| p + 1);
         let total = self.session.get(id).map_or(0, |d| d.info.pages.len());
-        let target_at = at.or(chosen).unwrap_or(after).min(total);
-        if self.apply_edit(pdfcraft_engine::Edit::InsertPagesFrom {
+        let target_at = at.unwrap_or(after).min(total);
+        if !self.apply_edit(pdfcraft_engine::Edit::InsertPagesFrom {
             name: "Clipboard".into(),
             bytes,
             pages: None,
             at: target_at,
             field_conflicts: pdfcraft_engine::FieldConflicts::Rename,
-        }) && let Some(view) = self.views.get_mut(i)
-        {
+        }) {
+            return Err("page insertion failed".into());
+        }
+        if let Some(view) = self.views.get_mut(i) {
             view.select_pages(&(target_at..target_at + page_count).collect::<Vec<_>>());
         }
         Ok(())
@@ -214,10 +217,9 @@ impl PdfCraftApp {
         let count = page_clip.pages.len();
         let Some(view) = self.views.get_mut(active_idx) else { return };
         let id = view.id;
-        let chosen = view.insert_at.take();
         let after = view.target_pages().last().copied().map_or(0, |p| p + 1);
         let total = self.session.get(id).map_or(0, |d| d.info.pages.len());
-        let target_at = at.or(chosen).unwrap_or(after).min(total);
+        let target_at = at.unwrap_or(after).min(total);
         let field_conflicts = if id == page_clip.from { pdfcraft_engine::FieldConflicts::Merge } else { pdfcraft_engine::FieldConflicts::Rename };
         if self.apply_edit(pdfcraft_engine::Edit::InsertPagesFrom {
             name: page_clip.name.clone(),
