@@ -671,6 +671,8 @@ pub enum ViewAction {
     },
     /// Paste copied pages after the selection.
     PastePages,
+    /// Insert pages from clipboard (image, text, or copied pages).
+    InsertFromClipboard,
     /// Enhance ▸ Camera image: straighten what the corners enclose.
     EnhanceCamera,
     /// Leave Enhance ▸ Camera image (Cancel before Enhance page, Done after it).
@@ -5504,6 +5506,10 @@ fn organize_grid(view: &mut DocView, info: &DocInfo, editable: bool, dirty: bool
                     }
                     if ui.add_enabled(editable, egui::Button::new(tl!("Paste after"))).clicked() {
                         view.pending_action = Some(ViewAction::PastePages);
+                        ui.close();
+                    }
+                    if ui.add_enabled(editable, egui::Button::new(tl!("Insert from clipboard"))).clicked() {
+                        view.pending_action = Some(ViewAction::InsertFromClipboard);
                         ui.close();
                     }
                 });
