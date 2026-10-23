@@ -4,13 +4,13 @@
 
 use egui::{Color32, CornerRadius, Pos2, Rect, Stroke, Vec2, pos2, vec2};
 use pdfcraft_engine::DocId;
-use pdfcraft_render::{PageRenderer, RenderConfig, RenderRequest, RequestKind, Tile};
+use pdfcraft_render::{RenderConfig, RenderPool, RenderRequest, RequestKind, Tile};
 
-use crate::canvas::PageXform;
+use crate::canvas::{PT, PageXform};
 use crate::theme::Tokens;
 use crate::{PdfCraftApp, QuickTool, icons};
 
-/// Cache key for reusing the rendered loupe texture.
+/// Cache key for tracking loupe aperture, zoom, and document generation changes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct LoupeCacheKey {
     /// Document identifier.
@@ -26,7 +26,6 @@ pub(crate) struct LoupeCacheKey {
 }
 
 /// State for the Loupe magnifier tool window and canvas aperture.
-#[derive(Clone)]
 pub struct LoupeState {
     /// 0-based page index currently being magnified.
     pub page: usize,
@@ -38,8 +37,16 @@ pub struct LoupeState {
     pub open: bool,
     /// Viewport size of the loupe image area in screen points.
     pub viewport_size: Vec2,
-    /// Cached texture handle and key to avoid redundant rendering.
-    pub(crate) cached: Option<(LoupeCacheKey, egui::TextureHandle)>,
+    /// Single-worker render pool for off-thread tile rendering.
+    pub(crate) pool: Option<(DocId, u64, RenderPool)>,
+    /// Last requested render tag.
+    pub(crate) requested_tag: u64,
+    /// Last received render tag.
+    pub(crate) received_tag: u64,
+    /// Current displayed texture (persists until replacement tile is ready).
+    pub(crate) texture: Option<egui::TextureHandle>,
+    /// Last requested cache key.
+    pub(crate) last_key: Option<LoupeCacheKey>,
 }
 
 impl std::fmt::Debug for LoupeState {
@@ -50,7 +57,8 @@ impl std::fmt::Debug for LoupeState {
             .field("zoom", &self.zoom)
             .field("open", &self.open)
             .field("viewport_size", &self.viewport_size)
-            .field("cached", &self.cached.as_ref().map(|(k, _)| k))
+            .field("requested_tag", &self.requested_tag)
+            .field("received_tag", &self.received_tag)
             .finish()
     }
 }
@@ -58,7 +66,18 @@ impl std::fmt::Debug for LoupeState {
 impl LoupeState {
     /// Creates a new Loupe tool state centered on page `page` with default 200% magnification.
     pub fn new(page: usize) -> Self {
-        Self { page, center: [0.5, 0.5], zoom: 2.0, open: true, viewport_size: vec2(280.0, 180.0), cached: None }
+        Self {
+            page,
+            center: [0.5, 0.5],
+            zoom: 2.0,
+            open: true,
+            viewport_size: vec2(280.0, 180.0),
+            pool: None,
+            requested_tag: 0,
+            received_tag: 0,
+            texture: None,
+            last_key: None,
+        }
     }
 
     /// Sets the magnification factor clamped to the 100%–800% (1.0–8.0) range.
@@ -91,9 +110,9 @@ impl LoupeState {
 
 /// Computes the page view points `[x0, y0, x1, y1]` corresponding to the loupe aperture.
 pub(crate) fn aperture_view_rect(center: [f32; 2], pw: f32, ph: f32, loupe_zoom: f32, view_zoom: f32, viewport_size: Vec2) -> [f32; 4] {
-    let scale = (loupe_zoom * view_zoom).max(0.1);
-    let ap_w = (viewport_size.x / scale).clamp(10.0, pw.max(10.0));
-    let ap_h = (viewport_size.y / scale).clamp(10.0, ph.max(10.0));
+    let scale = (loupe_zoom * view_zoom * PT).max(0.1);
+    let ap_w = (viewport_size.x / scale).clamp(1.0, pw.max(1.0));
+    let ap_h = (viewport_size.y / scale).clamp(1.0, ph.max(1.0));
     let nu = ap_w / pw.max(1.0);
     let nv = ap_h / ph.max(1.0);
 
@@ -140,6 +159,9 @@ pub(crate) fn page_input(ui: &egui::Ui, resp: &egui::Response, xf: &PageXform, p
 pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
     let Some(active) = app.active else {
         app.loupe = None;
+        if app.quick_tool == QuickTool::Loupe {
+            app.quick_tool = QuickTool::Select;
+        }
         return;
     };
     let Some(loupe) = &mut app.loupe else {
@@ -155,14 +177,25 @@ pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
 
     let Some(view) = app.views.get(active) else {
         app.loupe = None;
+        if app.quick_tool == QuickTool::Loupe {
+            app.quick_tool = QuickTool::Select;
+        }
         return;
     };
     let Some(doc) = app.session.get(view.id) else {
         app.loupe = None;
+        if app.quick_tool == QuickTool::Loupe {
+            app.quick_tool = QuickTool::Select;
+        }
         return;
     };
 
     let t = Tokens::get(ctx);
+    let paper = app
+        .session
+        .reading_colors(view.id)
+        .and_then(|c| c.params)
+        .map_or(Color32::WHITE, |p| Color32::from_rgb(p.background[0], p.background[1], p.background[2]));
     let mut is_open = loupe.open;
     let mut drag_delta = None;
 
@@ -197,12 +230,17 @@ pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
             let vr = aperture_view_rect(loupe.center, pw, ph, loupe.zoom, view.zoom, loupe.viewport_size);
 
             let ppp = ctx.pixels_per_point();
-            let scale = (loupe.zoom * ppp).clamp(1.0, 16.0);
+            let effective_scale = (loupe.zoom * view.zoom * PT * ppp).max(0.1);
+            let actual_ap_w = (vr[2] - vr[0]).max(1.0);
+            let actual_ap_h = (vr[3] - vr[1]).max(1.0);
+            let max_scale = (2048.0 / actual_ap_w.max(actual_ap_h)).max(0.1);
+            let scale = effective_scale.min(max_scale);
+
             let tile = Tile {
                 x: (vr[0] * scale).floor().max(0.0) as u32,
                 y: (vr[1] * scale).floor().max(0.0) as u32,
-                w: ((vr[2] - vr[0]) * scale).ceil().clamp(1.0, 2048.0) as u32,
-                h: ((vr[3] - vr[1]) * scale).ceil().clamp(1.0, 2048.0) as u32,
+                w: (actual_ap_w * scale).ceil().clamp(1.0, 2048.0) as u32,
+                h: (actual_ap_h * scale).ceil().clamp(1.0, 2048.0) as u32,
             };
 
             let key = LoupeCacheKey {
@@ -213,31 +251,50 @@ pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
                 scale_bits: scale.to_bits(),
             };
 
-            let texture = match &loupe.cached {
-                Some((cached_key, tex)) if cached_key == &key => tex.clone(),
-                _ => {
-                    let config = RenderConfig {
-                        password: doc.password.as_deref().map(std::sync::Arc::from),
-                        reading_colors: app.reading_colors,
-                        ..RenderConfig::default()
-                    };
-                    let mut r = PageRenderer::new(doc.bytes.clone(), config);
-                    let out = r.render(RenderRequest { page: page_idx, kind: RequestKind::Pixels, tile: Some(tile), scale, tag: 0, preview: false });
+            // Ensure background render pool matches current document and edit generation.
+            let doc_gen = doc.edit_generation();
+            if loupe.pool.as_ref().is_none_or(|(id, generation, _)| *id != view.id || *generation != doc_gen) {
+                let config = RenderConfig {
+                    password: doc.password.as_deref().map(std::sync::Arc::from),
+                    reading_colors: app.reading_colors,
+                    ..RenderConfig::default()
+                };
+                let pool = RenderPool::new(doc.bytes.clone(), 1, config).without_replacements();
+                loupe.pool = Some((view.id, doc_gen, pool));
+                loupe.last_key = None;
+            }
 
-                    let img = if out.error.is_none() && out.rgba.len() >= (out.width as usize) * (out.height as usize) * 4 {
-                        egui::ColorImage::from_rgba_unmultiplied([out.width as usize, out.height as usize], &out.rgba)
-                    } else {
-                        egui::ColorImage::filled([tile.w.max(1) as usize, tile.h.max(1) as usize], Color32::WHITE)
-                    };
-                    let tex = ctx.load_texture("loupe-magnified", img, egui::TextureOptions::LINEAR);
-                    loupe.cached = Some((key, tex.clone()));
-                    tex
+            // Receive any completed tile results from the background worker.
+            if let Some((_, _, pool)) = &loupe.pool {
+                while let Some(out) = pool.try_recv() {
+                    if out.request.tag == loupe.requested_tag && out.error.is_none() && out.width > 0 && out.height > 0 {
+                        let img = crate::canvas::texture_image([out.width as usize, out.height as usize], out.rgba);
+                        loupe.texture = Some(ctx.load_texture("loupe-magnified", img, egui::TextureOptions::LINEAR));
+                        loupe.received_tag = out.request.tag;
+                    }
                 }
-            };
+            }
+
+            // Submit a fresh tile request when the aperture, page, zoom, or scale changes.
+            if loupe.last_key.as_ref() != Some(&key) {
+                loupe.last_key = Some(key);
+                loupe.requested_tag = loupe.requested_tag.wrapping_add(1);
+                let tag = loupe.requested_tag;
+                if let Some((_, _, pool)) = &loupe.pool {
+                    pool.set_queue(vec![RenderRequest { page: page_idx, kind: RequestKind::Pixels, tile: Some(tile), scale, tag, preview: false }]);
+                }
+            }
+
+            // Request next frame update while awaiting background render.
+            if loupe.received_tag != loupe.requested_tag {
+                ctx.request_repaint_after(std::time::Duration::from_millis(16));
+            }
 
             let (rect, resp) = ui.allocate_exact_size(loupe.viewport_size, egui::Sense::drag());
-            ui.painter().rect_filled(rect, CornerRadius::same(4), t.pasteboard);
-            ui.painter().image(texture.id(), rect, Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)), Color32::WHITE);
+            ui.painter().rect_filled(rect, CornerRadius::same(4), paper);
+            if let Some(tex) = &loupe.texture {
+                ui.painter().image(tex.id(), rect, Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)), Color32::WHITE);
+            }
             ui.painter().rect_stroke(rect, CornerRadius::same(4), Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
 
             if resp.dragged() {
@@ -256,8 +313,8 @@ pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
     {
         let page_idx = loupe.page.min(doc.info.pages.len().saturating_sub(1));
         let (pw, ph) = doc.info.pages.get(page_idx).map_or((612.0, 792.0), |p| (p.width, p.height));
-        let delta_u = -delta.x / (pw * loupe.zoom * view.zoom).max(1.0);
-        let delta_v = -delta.y / (ph * loupe.zoom * view.zoom).max(1.0);
+        let delta_u = -delta.x / (pw * loupe.zoom * view.zoom * PT).max(1.0);
+        let delta_v = -delta.y / (ph * loupe.zoom * view.zoom * PT).max(1.0);
         loupe.center[0] = (loupe.center[0] + delta_u).clamp(0.0, 1.0);
         loupe.center[1] = (loupe.center[1] + delta_v).clamp(0.0, 1.0);
     }
