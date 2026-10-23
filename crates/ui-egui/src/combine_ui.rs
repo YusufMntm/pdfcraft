@@ -180,6 +180,7 @@ pub struct CombineConverting {
     pub progress: Option<(usize, usize, String)>,
 }
 
+/// Returns the Turkish localized string if Turkish is active, otherwise the English original.
 fn tr_combine_text(en: &'static str, tr: &'static str) -> &'static str {
     if crate::i18n::current().code() == "tr" { tr } else { en }
 }
@@ -514,10 +515,12 @@ impl CombineTab {
 }
 
 impl CombineFile {
+    /// Whether this file is a supported Microsoft Office document.
     pub fn is_office(&self) -> bool {
         pdfcraft_engine::is_office_name(&self.name)
     }
 
+    /// Whether this Office file needs to be converted before combining.
     pub fn needs_conversion(&self) -> bool {
         self.is_office() && self.temp_pdf.is_none()
     }

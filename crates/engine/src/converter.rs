@@ -87,6 +87,7 @@ pub struct TempConvertedPdf {
 }
 
 impl TempConvertedPdf {
+    /// Wrap a converted PDF path and its parent temporary directory.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn new(path: PathBuf, temp_dir: tempfile::TempDir) -> Self {
         Self { path, _temp_dir: temp_dir }
@@ -224,6 +225,7 @@ pub fn convert_bytes_to_pdf(name: &str, bytes: &[u8]) -> Result<TempConvertedPdf
     }
 }
 
+/// Escape single quotes and Unicode apostrophes for single-quoted PowerShell strings.
 #[cfg(any(target_os = "windows", test))]
 fn ps_quote(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
@@ -238,6 +240,7 @@ fn ps_quote(s: &str) -> String {
     out
 }
 
+/// Run a child process with a timeout, consuming stdout and stderr concurrently.
 #[cfg(not(target_arch = "wasm32"))]
 fn run_with_timeout(mut child: std::process::Child, timeout: std::time::Duration) -> Result<std::process::Output, ConversionError> {
     let stdout_handle = child.stdout.take();
@@ -280,6 +283,7 @@ fn run_with_timeout(mut child: std::process::Child, timeout: std::time::Duration
     }
 }
 
+/// Convert an Office document using native Microsoft Office COM automation via PowerShell.
 #[cfg(all(target_os = "windows", not(target_arch = "wasm32")))]
 fn convert_with_ms_office(app: OfficeApp, input_path: &Path, output_path: &Path) -> Result<(), ConversionError> {
     let in_str = input_path.to_str().ok_or_else(|| ConversionError::ProcessFailed("invalid input path".into()))?;
@@ -386,6 +390,7 @@ try {{
     Ok(())
 }
 
+/// Discover the LibreOffice (`soffice.exe` / `soffice`) binary on the system.
 #[cfg(not(target_arch = "wasm32"))]
 fn find_libreoffice() -> Option<PathBuf> {
     #[cfg(target_os = "windows")]
@@ -407,7 +412,12 @@ fn find_libreoffice() -> Option<PathBuf> {
         }
 
         // 2. Check PATH with where.exe
-        if let Ok(output) = std::process::Command::new("where.exe").arg("soffice.exe").output()
+        if let Ok(child) = std::process::Command::new("where.exe")
+            .arg("soffice.exe")
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            && let Ok(output) = run_with_timeout(child, std::time::Duration::from_secs(60))
             && output.status.success()
         {
             let text = String::from_utf8_lossy(&output.stdout);
@@ -420,10 +430,26 @@ fn find_libreoffice() -> Option<PathBuf> {
         }
 
         // Test running directly
-        if std::process::Command::new("soffice.exe").arg("--version").output().is_ok_and(|o| o.status.success()) {
+        if std::process::Command::new("soffice.exe")
+            .arg("--version")
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .ok()
+            .and_then(|child| run_with_timeout(child, std::time::Duration::from_secs(60)).ok())
+            .is_some_and(|o| o.status.success())
+        {
             return Some(PathBuf::from("soffice.exe"));
         }
-        if std::process::Command::new("soffice").arg("--version").output().is_ok_and(|o| o.status.success()) {
+        if std::process::Command::new("soffice")
+            .arg("--version")
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .ok()
+            .and_then(|child| run_with_timeout(child, std::time::Duration::from_secs(60)).ok())
+            .is_some_and(|o| o.status.success())
+        {
             return Some(PathBuf::from("soffice"));
         }
         None
@@ -448,7 +474,15 @@ fn find_libreoffice() -> Option<PathBuf> {
 
         // Check PATH
         for cmd in ["soffice", "libreoffice"] {
-            if std::process::Command::new(cmd).arg("--version").output().is_ok_and(|o| o.status.success()) {
+            if std::process::Command::new(cmd)
+                .arg("--version")
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .ok()
+                .and_then(|child| run_with_timeout(child, std::time::Duration::from_secs(60)).ok())
+                .is_some_and(|o| o.status.success())
+            {
                 return Some(PathBuf::from(cmd));
             }
         }
@@ -461,6 +495,7 @@ fn find_libreoffice() -> Option<PathBuf> {
     }
 }
 
+/// Convert an Office document file using headless LibreOffice in an isolated user profile.
 #[cfg(not(target_arch = "wasm32"))]
 fn convert_with_libreoffice(soffice: &Path, input_path: &Path, output_path: &Path) -> Result<(), ConversionError> {
     let out_dir = output_path.parent().unwrap_or_else(|| Path::new("."));
