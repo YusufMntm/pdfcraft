@@ -1921,6 +1921,10 @@ impl PdfCraftApp {
             return OpenOutcome::Pending;
         }
         let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_string());
+        if pdfcraft_engine::is_office_lock_file(&name) {
+            self.notify_fmt("Couldn't open {name}: temporary Office lock files (~$*) cannot be opened", &[("name", &name)]);
+            return OpenOutcome::Failed;
+        }
         // Taken before reading: a build that rewrites the file meanwhile still counts as a change.
         let stamp = file_watch::Stamp::at(path);
         // Before the first frame there is no interaction to keep responsive; this also preserves

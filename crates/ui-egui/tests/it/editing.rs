@@ -943,6 +943,16 @@ fn opening_a_missing_file_fails_and_tells_the_user() {
 }
 
 #[test]
+fn opening_an_office_lock_file_fails_and_tells_the_user() {
+    let mut app = PdfCraftApp::new();
+    app.set_option("language", "en").unwrap();
+    let lock_file = std::env::temp_dir().join("~$locked.docx");
+    assert_eq!(app.open_path(&lock_file.to_string_lossy()), OpenOutcome::Failed);
+    assert!(app.views.is_empty());
+    assert!(app.toast.as_ref().is_some_and(|t| t.0.contains("Office lock files")));
+}
+
+#[test]
 fn opening_the_same_file_with_a_dot_component_focuses_its_tab() {
     let pdfs = TempPdfs::new("dedup-dot");
     let a = pdfs.file("a.pdf", 1);
