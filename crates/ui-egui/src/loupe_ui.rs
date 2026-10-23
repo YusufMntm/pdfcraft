@@ -267,10 +267,12 @@ pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
             // Receive any completed tile results from the background worker.
             if let Some((_, _, pool)) = &loupe.pool {
                 while let Some(out) = pool.try_recv() {
-                    if out.request.tag == loupe.requested_tag && out.error.is_none() && out.width > 0 && out.height > 0 {
-                        let img = crate::canvas::texture_image([out.width as usize, out.height as usize], out.rgba);
-                        loupe.texture = Some(ctx.load_texture("loupe-magnified", img, egui::TextureOptions::LINEAR));
+                    if out.request.tag == loupe.requested_tag {
                         loupe.received_tag = out.request.tag;
+                        if out.error.is_none() && out.width > 0 && out.height > 0 {
+                            let img = crate::canvas::texture_image([out.width as usize, out.height as usize], out.rgba);
+                            loupe.texture = Some(ctx.load_texture("loupe-magnified", img, egui::TextureOptions::LINEAR));
+                        }
                     }
                 }
             }
@@ -293,7 +295,9 @@ pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
             let (rect, resp) = ui.allocate_exact_size(loupe.viewport_size, egui::Sense::drag());
             ui.painter().rect_filled(rect, CornerRadius::same(4), paper);
             if let Some(tex) = &loupe.texture {
-                ui.painter().image(tex.id(), rect, Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)), Color32::WHITE);
+                let shown = vec2(actual_ap_w, actual_ap_h) * (scale / ppp);
+                let img_rect = Rect::from_center_size(rect.center(), shown);
+                ui.painter().image(tex.id(), img_rect, Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)), Color32::WHITE);
             }
             ui.painter().rect_stroke(rect, CornerRadius::same(4), Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
 
