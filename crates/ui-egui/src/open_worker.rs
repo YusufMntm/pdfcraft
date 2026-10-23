@@ -177,10 +177,7 @@ fn prepare(job: Job) -> ResultKind {
     };
     #[cfg(not(target_arch = "wasm32"))]
     if pdfcraft_engine::is_office_name(&job.name) {
-        let converted = match &job.input {
-            Input::Path(p) if p.is_file() => pdfcraft_engine::converter::convert_to_temp_pdf(p),
-            _ => pdfcraft_engine::converter::convert_bytes_to_pdf(&job.name, &bytes),
-        };
+        let converted = pdfcraft_engine::converter::convert_bytes_to_pdf(&job.name, &bytes);
         match converted {
             Ok(temp_pdf) => match temp_pdf.read_bytes() {
                 Ok(pdf_bytes) => {
