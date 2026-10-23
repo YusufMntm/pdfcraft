@@ -4746,7 +4746,7 @@ fn page_context_menu(
     let selected_text = view.selected_text().is_some_and(|t| !t.is_empty());
     let mut image_hit = None;
     if let Some((page, at)) = view.comments.context_at {
-        let key = egui::Id::new("copy-image-under-menu");
+        let key = egui::Id::new(("copy-image-under-menu", view.id.0, doc.edit_generation()));
         let cached = ui.data(|d| d.get_temp::<(usize, [f64; 2], Option<usize>)>(key)).filter(|c| c.0 == page && c.1 == at);
         let hit = match cached {
             Some(c) => c.2,
