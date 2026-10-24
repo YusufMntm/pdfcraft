@@ -768,6 +768,7 @@ fn initial_view_is_edited_and_honoured_on_open() {
     assert_eq!((view.current, view.cover, app.right), (1, true, Some(pdfcraft_ui_egui::RightPanel::Bookmarks)));
 }
 
+/// Simulate dragging from position `a` to position `b` across several interpolation steps.
 fn drag(h: &mut Harness<'static, PdfCraftApp>, a: egui::Pos2, b: egui::Pos2) {
     h.hover_at(a);
     h.run_steps(1);
@@ -781,6 +782,7 @@ fn drag(h: &mut Harness<'static, PdfCraftApp>, a: egui::Pos2, b: egui::Pos2) {
     h.run_steps(3);
 }
 
+/// Test Marquee Zoom and Snapshot interactions.
 #[test]
 fn marquee_zoom_and_snapshot() {
     let mut h = harness();
@@ -880,6 +882,7 @@ fn dynamic_zoom_drags_up_to_zoom_in_and_down_to_zoom_out() {
     assert_eq!(pdfcraft_ui_egui::i18n::tr(tr, "Dynamic zoom"), "Dinamik yakınlaştırma");
 }
 
+/// Test that `view.fit_visible` zooms into the page content width.
 #[test]
 fn fit_visible_zooms_to_the_content_width() {
     let mut h = harness();

@@ -110,6 +110,7 @@ impl PdfCraftApp {
         }
     }
 
+    /// Execute a registered command by id without panic guarding.
     fn execute_unguarded(&mut self, id: &str) -> bool {
         let Some(spec) = commands::command(id) else { return false };
         if !self.command_enabled(spec) {

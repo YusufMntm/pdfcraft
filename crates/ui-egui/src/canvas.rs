@@ -2450,6 +2450,7 @@ impl PageXform {
     }
 }
 
+/// Handle global viewport keyboard shortcuts (zoom, rotation, history, find, Escape).
 pub fn shortcuts(view: &mut DocView, ctx: &egui::Context, speed: crate::scroll_speed::ScrollSpeed) {
     use egui::{Key, KeyboardShortcut, Modifiers};
     if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::F))) {
