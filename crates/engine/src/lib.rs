@@ -4597,9 +4597,10 @@ impl Session {
         if let Some(why) = &doc.read_only_reason {
             return Err(EditError::ReadOnly(why.clone()));
         }
+        let boxes = white_margins::detect_pages_content_boxes(doc, pages)?;
         let mut edits = Vec::new();
-        for &p in pages {
-            if let Some(rect) = white_margins::detect_page_content_box(doc, p)? {
+        for (p, rect_opt) in boxes {
+            if let Some(rect) = rect_opt {
                 edits.push(Edit::SetPageBox { pages: vec![p], which: PageBox::Crop, spec: BoxSpec::Rect(rect) });
             }
         }

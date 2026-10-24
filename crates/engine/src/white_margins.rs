@@ -14,6 +14,35 @@ use crate::{Document, EditError};
 /// Returns `Ok(Some([x0, y0, x1, y1]))` in user space if content was found, or `Ok(None)` if
 /// the page is entirely white or empty.
 pub fn detect_page_content_box(doc: &Document, page: usize) -> Result<Option<[f64; 4]>, EditError> {
+    let config = RenderConfig { password: doc.password.as_deref().map(Arc::from), ..Default::default() };
+    let mut renderer = PageRenderer::new(doc.display.clone(), config);
+    let all_boxes = doc.page_boxes();
+    detect_page_content_box_impl(doc, page, &mut renderer, &all_boxes)
+}
+
+/// Bounding box of detected non-white content for a page: `(page_index, Option<[x0, y0, x1, y1]>)`.
+pub type PageContentBox = (usize, Option<[f64; 4]>);
+
+/// Batch content box detection reusing a single [`PageRenderer`] and `page_boxes` snapshot across multiple pages.
+pub fn detect_pages_content_boxes(doc: &Document, pages: &[usize]) -> Result<Vec<PageContentBox>, EditError> {
+    let config = RenderConfig { password: doc.password.as_deref().map(Arc::from), ..Default::default() };
+    let mut renderer = PageRenderer::new(doc.display.clone(), config);
+    let all_boxes = doc.page_boxes();
+    let mut results = Vec::with_capacity(pages.len());
+    for &page in pages {
+        let bbox = detect_page_content_box_impl(doc, page, &mut renderer, &all_boxes)?;
+        results.push((page, bbox));
+    }
+    Ok(results)
+}
+
+/// Internal helper scanning the raster output of a single page using a shared renderer and page boxes snapshot.
+fn detect_page_content_box_impl(
+    doc: &Document,
+    page: usize,
+    renderer: &mut PageRenderer,
+    all_boxes: &[[[f64; 4]; 5]],
+) -> Result<Option<[f64; 4]>, EditError> {
     let Some(info) = doc.info.pages.get(page) else {
         return Err(EditError::Invalid(format!("there is no page {}", page.saturating_add(1))));
     };
@@ -26,8 +55,6 @@ pub fn detect_page_content_box(doc: &Document, page: usize) -> Result<Option<[f6
     let max_dim = info.width.max(info.height);
     let scale = if max_dim.is_finite() && max_dim > 0.0 { (1200.0 / max_dim).clamp(0.2, 1.5) } else { 1.0 };
 
-    let config = RenderConfig { password: doc.password.as_deref().map(Arc::from), ..Default::default() };
-    let mut renderer = PageRenderer::new(doc.display.clone(), config);
     let shot = renderer.render(RenderRequest { page, scale, ..Default::default() });
     if let Some(e) = shot.error {
         return Err(EditError::Invalid(format!("page {} could not be rendered: {e}", page + 1)));
@@ -89,7 +116,8 @@ pub fn detect_page_content_box(doc: &Document, page: usize) -> Result<Option<[f6
         return Ok(None);
     }
 
-    let s = if scale.is_finite() && scale > 0.001 { scale as f64 } else { 1.0 };
+    let eff_scale = pdfcraft_render::effective_scale(info.width, info.height, scale);
+    let s = if eff_scale.is_finite() && eff_scale > 0.001 { eff_scale as f64 } else { 1.0 };
     let vx0 = min_x as f64 / s;
     let vy0 = min_y as f64 / s;
     let vx1 = (max_x.saturating_add(1)) as f64 / s;
@@ -108,7 +136,7 @@ pub fn detect_page_content_box(doc: &Document, page: usize) -> Result<Option<[f6
     }
 
     // Clamp within the page's MediaBox.
-    let media = doc.page_boxes().get(page).map(|boxes| boxes[0]).unwrap_or([0.0, 0.0, info.width as f64, info.height as f64]);
+    let media = all_boxes.get(page).map(|boxes| boxes[0]).unwrap_or([0.0, 0.0, info.width as f64, info.height as f64]);
     let min_media_x = media[0].min(media[2]);
     let max_media_x = media[0].max(media[2]);
     let min_media_y = media[1].min(media[3]);

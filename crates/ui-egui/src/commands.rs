@@ -362,8 +362,16 @@ impl PdfCraftApp {
             "page.remove_white_margins" => {
                 if let Some(i) = active {
                     let id = self.views[i].id;
-                    if let Err(e) = self.session.remove_white_margins(id, &targets) {
-                        self.notify(e.to_string());
+                    match self.session.remove_white_margins(id, &targets) {
+                        Ok(()) => {
+                            if let Some(doc) = self.session.get(id) {
+                                self.views[i].document_changed(&doc.info);
+                            }
+                            if let Some(ctx) = &self.ctx {
+                                ctx.request_repaint();
+                            }
+                        }
+                        Err(e) => self.notify(e.to_string()),
                     }
                 }
             }
