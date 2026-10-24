@@ -586,7 +586,9 @@ fn main_menu(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                         if widgets::menu_item(ui, tl!("Zoom out"), &key(ZOOM_OUT)).clicked() {
                             v.zoom_step(false);
                         }
-                        if widgets::menu_item(ui, tl!("Pan & Zoom"), "").clicked() {
+                        let pan_zoom_open = app.pan_zoom.as_ref().is_some_and(|state| state.open);
+                        let pan_zoom_label = if pan_zoom_open { format!("✓ {}", tl!("Pan & Zoom")) } else { tl!("Pan & Zoom").to_owned() };
+                        if widgets::menu_item(ui, &pan_zoom_label, "").clicked() {
                             ui.close();
                             app.execute("view.pan_zoom");
                             return;
