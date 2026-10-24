@@ -545,6 +545,7 @@ pub(crate) fn scroll_menu(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
     egui::ScrollArea::vertical().max_height(height).auto_shrink([true, true]).show(ui, add);
 }
 
+/// Renders the main application menu popup and its submenus.
 fn main_menu(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
     let resp = widgets::ghost_button(ui, "panel-left", tl!("Menu"));

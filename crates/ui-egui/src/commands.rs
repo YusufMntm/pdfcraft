@@ -110,6 +110,7 @@ impl PdfCraftApp {
         }
     }
 
+    /// Executes a command by id without catching panics.
     fn execute_unguarded(&mut self, id: &str) -> bool {
         let Some(spec) = commands::command(id) else { return false };
         if !self.command_enabled(spec) {

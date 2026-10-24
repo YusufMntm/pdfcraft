@@ -9,6 +9,7 @@ use crate::{CloseRequest, Dialog, PdfCraftApp, PropsTab, panels::human_size, wid
 
 const INFO_KEYS: [&str; 4] = ["Title", "Author", "Subject", "Keywords"];
 
+/// Shows active modal dialogs, overview windows, and security unlock prompts.
 pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
     dialogs(app, ctx);
     crate::pan_zoom_ui::show(app, ctx);
@@ -16,6 +17,7 @@ pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
     unlock(app, ctx);
 }
 
+/// Dispatches standard modal dialogs.
 fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
     password(app, ctx);
     save_prompt(app, ctx);
