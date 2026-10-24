@@ -1214,6 +1214,14 @@ fn single_select_list_box_with_array_v_is_lenient_and_highlights_first_only() {
     let h = field(&all, "H_twovals");
     assert_eq!(h.indices, [0], "only first value (TW) is retained for single-select");
     assert_eq!(h.display_value(), "Taiwan");
+    let h_obj_orig = doc.get(h.obj);
+    let original_v = h_obj_orig.as_dict().unwrap().get(b"V").unwrap().clone();
+    let untouched = reopen(&doc);
+    let untouched_fields = fields(&untouched);
+    let untouched_h = field(&untouched_fields, "H_twovals");
+    let untouched_obj = untouched.get(untouched_h.obj);
+    let untouched_v = untouched_obj.as_dict().unwrap().get(b"V").unwrap();
+    assert_eq!(untouched_v, &original_v, "opening and saving without edits preserves /V");
 
     // Appearance highlights Taiwan alone (one highlight rect, not two)
     let drawn = with_field_appearances(&doc).expect("draws appearances");
