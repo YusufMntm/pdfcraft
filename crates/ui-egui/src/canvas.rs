@@ -4699,8 +4699,6 @@ fn run_link_target(app: &mut PdfCraftApp, index: usize, target: &LinkTarget, pen
             "PrevPage" => app.views[index].step_page(false),
             "FirstPage" => app.views[index].go_to_page(0),
             "LastPage" => app.views[index].go_to_page(pages.saturating_sub(1)),
-            "Print" => app.open_print(),
-            "SaveAs" => app.run_command("file.save_as"),
             _ => {} // ISO 32000-2 Table 215: if the viewer does not recognise the name, it shall take no action.
         },
         LinkTarget::Hide { fields, hide } => {

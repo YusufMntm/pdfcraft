@@ -770,7 +770,19 @@ fn link_actions_fixture() -> Vec<u8> {
     for (i, &p) in pages.iter().enumerate() {
         contents.insert(p, format!("BT /F1 36 Tf 200 700 Td (PAGE {}) Tj ET ", i + 1));
     }
-    let mut n = 40;
+    let fields = ["20 0 R".to_string(), "21 0 R".to_string(), "22 0 R".to_string()];
+    for (id, name, x, v, dv) in [(20, "secret", 72, "SECRET", "SECRET"), (21, "f1", 260, "typed 1", "one"), (22, "f2", 420, "typed 2", "two")] {
+        objs.insert(
+            id,
+            format!(
+                "<< /Type /Annot /Subtype /Widget /F 4 /FT /Tx /T ({name}) /V ({v}) /DV ({dv}) /Rect [{x} 200 {} 224] /P {} 0 R /DA (/Helv 11 Tf 0 g) >>",
+                x + 120,
+                pages[0]
+            ),
+        );
+        annots.get_mut(&pages[0]).unwrap().push(format!("{id} 0 R"));
+    }
+    let mut n = 30;
     struct LinkBuilder<'a> {
         contents: &'a mut std::collections::HashMap<usize, String>,
         objs: &'a mut std::collections::BTreeMap<usize, String>,
@@ -791,30 +803,16 @@ fn link_actions_fixture() -> Vec<u8> {
         ("Named /NextPage", "<< /S /Named /N /NextPage >>"),
         ("Named /LastPage", "<< /S /Named /N /LastPage >>"),
         ("Named /Bogus: nothing should happen", "<< /S /Named /N /Bogus >>"),
-        ("Hide the field secret", "<< /S /Hide /T (secret) >>"),
-        ("Show secret again (/H false)", "<< /S /Hide /T (secret) /H false >>"),
+        ("Hide secret by reference with default /H", "<< /S /Hide /T 20 0 R >>"),
+        ("Show secret again (/H false in array)", "<< /S /Hide /T [20 0 R] /H false >>"),
+        ("ResetForm empty include mode", "<< /S /ResetForm /Fields [(nonexistent)] /Flags 0 >>"),
         ("ResetForm f1 only", "<< /S /ResetForm /Fields [(f1)] /Flags 0 >>"),
-        ("ResetForm all but f1 (/Flags 1)", "<< /S /ResetForm /Fields [(f1)] /Flags 1 >>"),
+        ("ResetForm all but f1 by reference (/Flags 1)", "<< /S /ResetForm /Fields [21 0 R] /Flags 1 >>"),
         ("NextPage, then /Next GoTo page 4", "<< /S /Named /N /NextPage /Next << /S /GoTo /D [16 0 R /Fit] >> >>"),
     ] {
         builder.add_link(pages[0], y, text, act);
         y -= 40;
     }
-    let mut fields = Vec::new();
-    for (name, x, v, dv) in [("secret", 72, "SECRET", "SECRET"), ("f1", 260, "typed 1", "one"), ("f2", 420, "typed 2", "two")] {
-        objs.insert(
-            n,
-            format!(
-                "<< /Type /Annot /Subtype /Widget /F 4 /FT /Tx /T ({name}) /V ({v}) /DV ({dv}) /Rect [{x} 200 {} 224] /P {} 0 R /DA (/Helv 11 Tf 0 g) >>",
-                x + 120,
-                pages[0]
-            ),
-        );
-        fields.push(format!("{n} 0 R"));
-        annots.get_mut(&pages[0]).unwrap().push(format!("{n} 0 R"));
-        n += 1;
-    }
-    let mut builder = LinkBuilder { contents: &mut contents, objs: &mut objs, annots: &mut annots, n: &mut n };
     builder.add_link(pages[1], 640, "Named /PrevPage", "<< /S /Named /N /PrevPage >>");
     builder.add_link(pages[2], 640, "Named /FirstPage", "<< /S /Named /N /FirstPage >>");
     builder.add_link(pages[3], 640, "Named /NextPage on the last page", "<< /S /Named /N /NextPage >>");
@@ -915,31 +913,43 @@ fn links_with_named_hide_reset_form_and_next_chain() {
     h.run_steps(4);
     assert_eq!(h.state().views[0].current, 0, "Bogus takes no action");
 
-    // 7. Hide field secret
+    // 7. Hide field secret by reference with default /H
     click_link_page(&mut h, 0, 520.0);
     h.run_steps(8);
     {
         let s = h.state();
         let bytes = s.session.save_bytes(s.views[0].id).unwrap();
         let doc = pdfcraft_cos::Document::open(bytes).unwrap();
-        let f = doc.get(pdfcraft_cos::ObjRef::new(48, 0)).as_dict().and_then(|d| d.int(b"F")).unwrap_or(0);
+        let f = doc.get(pdfcraft_cos::ObjRef::new(20, 0)).as_dict().and_then(|d| d.int(b"F")).unwrap_or(0);
         assert_eq!(f & 2, 2, "secret field is hidden (/F bit 2)");
     }
 
-    // 8. Show secret again (/H false)
+    // 8. Show secret again (/H false in array)
     click_link_page(&mut h, 0, 480.0);
     h.run_steps(8);
     {
         let s = h.state();
         let bytes = s.session.save_bytes(s.views[0].id).unwrap();
         let doc = pdfcraft_cos::Document::open(bytes).unwrap();
-        let f = doc.get(pdfcraft_cos::ObjRef::new(48, 0)).as_dict().and_then(|d| d.int(b"F")).unwrap_or(0);
+        let f = doc.get(pdfcraft_cos::ObjRef::new(20, 0)).as_dict().and_then(|d| d.int(b"F")).unwrap_or(0);
         assert_eq!(f & 2, 0, "secret field is shown again");
     }
 
-    // 9. ResetForm f1 only (/Fields [(f1)] /Flags 0)
+    // 9. ResetForm with empty include mode: no fields are reset
     // Initially f1 is "typed 1", f2 is "typed 2"
     click_link_page(&mut h, 0, 440.0);
+    h.run_steps(8);
+    {
+        let s = h.state();
+        let doc = s.session.get(s.views[0].id).unwrap();
+        let f1 = doc.form.iter().find(|f| f.name == "f1").unwrap().value.clone();
+        let f2 = doc.form.iter().find(|f| f.name == "f2").unwrap().value.clone();
+        assert_eq!(f1, ["typed 1"], "f1 left untouched by empty include-mode reset");
+        assert_eq!(f2, ["typed 2"], "f2 left untouched by empty include-mode reset");
+    }
+
+    // 10. ResetForm f1 only (/Fields [(f1)] /Flags 0)
+    click_link_page(&mut h, 0, 400.0);
     h.run_steps(8);
     {
         let s = h.state();
@@ -955,8 +965,8 @@ fn links_with_named_hide_reset_form_and_next_chain() {
         .apply_edit(pdfcraft_engine::Edit::SetFieldValue { name: "f1".into(), value: pdfcraft_engine::FieldValue::Text("typed 1 again".into()) });
     h.run_steps(4);
 
-    // 10. ResetForm all but f1 (/Fields [(f1)] /Flags 1)
-    click_link_page(&mut h, 0, 400.0);
+    // 11. ResetForm all but f1 by reference (/Fields [21 0 R] /Flags 1)
+    click_link_page(&mut h, 0, 360.0);
     h.run_steps(8);
     {
         let s = h.state();
@@ -967,8 +977,8 @@ fn links_with_named_hide_reset_form_and_next_chain() {
         assert_eq!(f2, ["two"], "f2 reset to its default");
     }
 
-    // 11. NextPage, then /Next GoTo page 4: goes to page 4
-    click_link_page(&mut h, 0, 360.0);
+    // 12. NextPage, then /Next GoTo page 4: goes to page 4
+    click_link_page(&mut h, 0, 320.0);
     h.run_steps(8);
     assert_eq!(h.state().views[0].current, 3, "chain finished on page 4");
 }

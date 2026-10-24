@@ -1640,6 +1640,9 @@ impl<'a> Inspector<'a> {
             Some("ResetForm") => {
                 let fields = self.reset_form_targets(a);
                 let exclude = a.get(b"Flags").ok().and_then(|f| self.resolve(f).as_i64().ok()).unwrap_or(0) & 1 != 0;
+                if !exclude && a.get(b"Fields").is_ok() && fields.is_empty() {
+                    return None;
+                }
                 Some(LinkTarget::ResetForm { fields, exclude })
             }
             Some(other) => Some(LinkTarget::Other(other.to_string())),
@@ -1673,8 +1676,10 @@ impl<'a> Inspector<'a> {
             Object::Dictionary(d) => {
                 if let Object::Reference(id) = item {
                     self.field_qualified_name(*id)
-                } else {
+                } else if d.get(b"FT").is_ok() || self.name(d, b"Subtype").as_deref() == Some("Widget") {
                     self.text(d, b"T")
+                } else {
+                    None
                 }
             }
             _ => {
@@ -1693,17 +1698,19 @@ impl<'a> Inspector<'a> {
         let mut parts = Vec::new();
         let mut cur = id;
         let mut seen = HashSet::new();
+        let mut is_field = false;
         while seen.insert(cur) && parts.len() < 32 {
             let Ok(d) = self.doc.get_dictionary(cur) else { break };
+            is_field |= d.get(b"FT").is_ok() || self.name(d, b"Subtype").as_deref() == Some("Widget");
             if let Some(t) = self.text(d, b"T") {
                 parts.push(t);
             }
-            match d.get(b"Parent").map(|p| self.resolve(p)) {
+            match d.get(b"Parent") {
                 Ok(Object::Reference(parent_id)) => cur = *parent_id,
                 _ => break,
             }
         }
-        (!parts.is_empty()).then(|| {
+        (is_field && !parts.is_empty()).then(|| {
             parts.reverse();
             parts.join(".")
         })
@@ -3581,17 +3588,25 @@ trailer << /Root 1 0 R >>
     #[test]
     fn links_read_named_hide_and_reset_form_actions() {
         let pdf = "%PDF-1.7\n\
-            1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R 5 0 R] >> >> endobj\n\
+            1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R 5 0 R 6 0 R] >> >> endobj\n\
             2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 400] >> endobj\n\
-            3 0 obj << /Type /Page /Parent 2 0 R /Annots [10 0 R 11 0 R 12 0 R 13 0 R 14 0 R 15 0 R] >> endobj\n\
+            3 0 obj << /Type /Page /Parent 2 0 R /Annots [10 0 R 11 0 R 12 0 R 13 0 R 14 0 R 15 0 R 16 0 R 17 0 R 18 0 R 19 0 R] >> endobj\n\
             4 0 obj << /Type /Annot /Subtype /Widget /FT /Tx /T (secret) /Rect [10 10 50 30] >> endobj\n\
             5 0 obj << /Type /Annot /Subtype /Widget /FT /Tx /T (f1) /Rect [60 10 100 30] >> endobj\n\
+            6 0 obj << /FT /Tx /T (parent) /Kids [7 0 R] >> endobj\n\
+            7 0 obj << /Type /Annot /Subtype /Widget /Parent 6 0 R /T (child) /Kids [8 0 R] /Rect [10 40 50 60] >> endobj\n\
+            8 0 obj << /Type /Annot /Subtype /Widget /Parent 7 0 R /Rect [10 70 50 90] >> endobj\n\
+            9 0 obj << /Type /Annot /Subtype /Text /T (CommentAuthor) /Rect [10 100 50 120] >> endobj\n\
             10 0 obj << /Type /Annot /Subtype /Link /Rect [0 0 10 10] /A << /S /Named /N /NextPage >> >> endobj\n\
             11 0 obj << /Type /Annot /Subtype /Link /Rect [0 10 10 20] /A << /S /Named /N /Bogus >> >> endobj\n\
             12 0 obj << /Type /Annot /Subtype /Link /Rect [0 20 10 30] /A << /S /Hide /T (secret) >> >> endobj\n\
             13 0 obj << /Type /Annot /Subtype /Link /Rect [0 30 10 40] /A << /S /Hide /T 4 0 R /H false >> >> endobj\n\
             14 0 obj << /Type /Annot /Subtype /Link /Rect [0 40 10 50] /A << /S /ResetForm /Fields [(f1)] /Flags 0 >> >> endobj\n\
             15 0 obj << /Type /Annot /Subtype /Link /Rect [0 50 10 60] /A << /S /ResetForm /Fields [5 0 R] /Flags 1 >> >> endobj\n\
+            16 0 obj << /Type /Annot /Subtype /Link /Rect [0 60 10 70] /A << /S /Hide /T [4 0 R 8 0 R] >> >> endobj\n\
+            17 0 obj << /Type /Annot /Subtype /Link /Rect [0 70 10 80] /A << /S /Hide /T 9 0 R >> >> endobj\n\
+            18 0 obj << /Type /Annot /Subtype /Link /Rect [0 80 10 90] /A << /S /ResetForm /Fields [9 0 R] /Flags 0 >> >> endobj\n\
+            19 0 obj << /Type /Annot /Subtype /Link /Rect [0 90 10 100] /A << /S /ResetForm /Flags 0 >> >> endobj\n\
             trailer << /Root 1 0 R >>\n%%EOF";
         let info = inspect(Arc::new(pdf.as_bytes().to_vec()), None).expect("opens");
         let targets: Vec<_> = info.links.iter().map(|l| l.target.clone()).collect();
@@ -3604,6 +3619,10 @@ trailer << /Root 1 0 R >>
                 LinkTarget::Hide { fields: vec!["secret".into()], hide: false },
                 LinkTarget::ResetForm { fields: vec!["f1".into()], exclude: false },
                 LinkTarget::ResetForm { fields: vec!["f1".into()], exclude: true },
+                LinkTarget::Hide { fields: vec!["secret".into(), "parent.child".into()], hide: true },
+                LinkTarget::Hide { fields: Vec::new(), hide: true },
+                // 18 is ResetForm with include-mode but only non-field target 9 0 R, so it's dropped (None)
+                LinkTarget::ResetForm { fields: Vec::new(), exclude: false },
             ]
         );
     }
