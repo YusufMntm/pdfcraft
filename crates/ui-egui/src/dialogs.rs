@@ -11,6 +11,7 @@ const INFO_KEYS: [&str; 4] = ["Title", "Author", "Subject", "Keywords"];
 
 pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
     dialogs(app, ctx);
+    crate::pan_zoom_ui::show(app, ctx);
     // Last, so it sits above Document Properties when Security's Unlock… asked for it.
     unlock(app, ctx);
 }

@@ -586,6 +586,11 @@ fn main_menu(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                         if widgets::menu_item(ui, tl!("Zoom out"), &key(ZOOM_OUT)).clicked() {
                             v.zoom_step(false);
                         }
+                        if widgets::menu_item(ui, tl!("Pan & Zoom"), "").clicked() {
+                            ui.close();
+                            app.execute("view.pan_zoom");
+                            return;
+                        }
                         if widgets::menu_item(ui, tl!("Rotate view clockwise"), &key(ROTATE_CW)).clicked() {
                             v.rotate_view(true);
                         }
