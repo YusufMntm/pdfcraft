@@ -974,6 +974,7 @@ fn files_written_from_an_attachment_tab_stay_inside_the_chosen_folder() {
     }
 }
 
+/// Verify that cancelling an older file picker does not reset a newer picker's insertion gap.
 #[test]
 fn cancelling_an_older_picker_does_not_clear_a_newer_insertion_gap() {
     let mut h = harness(&[3]);

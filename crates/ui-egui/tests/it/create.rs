@@ -362,6 +362,7 @@ fn multiple_files_past_a_thousand_are_all_used() {
     assert_eq!(doc.info.pages.len(), 1001, "every picked file is used, in order");
 }
 
+/// Verify inserting pages from clipboard with images, text, internal copied pages, and undo/redo.
 #[test]
 fn insert_from_clipboard_image_text_and_copied_pages() {
     let mut app = PdfCraftApp::new();
