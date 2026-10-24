@@ -258,8 +258,10 @@ pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
                     PanZoomDrag::Handle => {
                         let delta = resp.drag_delta();
                         let cur_diag = (nav_box.width().powi(2) + nav_box.height().powi(2)).sqrt().max(1.0);
-                        let new_w = (nav_box.width() + delta.x).max(nav_box.width().min(10.0));
-                        let new_h = (nav_box.height() + delta.y).max(nav_box.height().min(10.0));
+                        let min_w = (nav_box.width() * 0.5).clamp(0.5, 4.0);
+                        let min_h = (nav_box.height() * 0.5).clamp(0.5, 4.0);
+                        let new_w = (nav_box.width() + delta.x).max(min_w);
+                        let new_h = (nav_box.height() + delta.y).max(min_h);
                         let new_diag = (new_w.powi(2) + new_h.powi(2)).sqrt().max(1.0);
                         let scale = cur_diag / new_diag;
                         let new_zoom = (view.zoom * scale).clamp(0.08, 64.0);
