@@ -1151,6 +1151,118 @@ fn multiselect_choice_indices_are_sorted_without_reordering_values() {
 }
 
 #[test]
+fn list_box_options_sharing_export_value_respects_i() {
+    // Repro 1 from #4531:
+    // /Opt [[(1) (One-A)] [(1) (One-B)] [(2) (Two)]] /V (1) /I [1]
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R] /NeedAppearances true /DA (/Helv 11 Tf 0 g) /DR << /Font << /Helv 5 0 R >> >> >> >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [4 0 R] >>".into(),
+        "<< /Type /Annot /Subtype /Widget /F 4 /P 3 0 R /FT /Ch /T (D_dup) /Ff 0 /Opt [[(1) (One-A)] [(1) (One-B)] [(2) (Two)]] /V (1) /I [1] /Rect [330 600 520 644] >>".into(),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
+    ];
+    let doc = document(&objs);
+    let all = fields(&doc);
+    let d_dup = field(&all, "D_dup");
+    assert_eq!(d_dup.indices, [1], "option 1 (One-B) is selected via /I [1]");
+    assert_eq!(d_dup.value, ["1"]);
+    assert_eq!(d_dup.display_value(), "One-B");
+
+    // Appearance generation: only One-B is highlighted, not both One-A and One-B
+    let drawn = with_field_appearances(&doc).expect("draws appearances");
+    let app_stream = ap(&drawn, &d_dup.widgets[0]);
+    assert_eq!(app_stream.matches("0.6 0.75 0.86 rg").count(), 1, "only One-B is highlighted, not One-A");
+
+    // Save and reopen after choosing One-B again (via ChoiceIndices)
+    let mut doc = doc;
+    set_value(&mut doc, "D_dup", &FieldValue::ChoiceIndices(vec![1])).unwrap();
+    let doc = reopen(&doc);
+    let all = fields(&doc);
+    let d_dup = field(&all, "D_dup");
+    assert_eq!(d_dup.indices, [1], "selection of One-B is retained across reopen");
+    assert_eq!(d_dup.display_value(), "One-B");
+    let app_stream = ap(&doc, &d_dup.widgets[0]);
+    assert_eq!(app_stream.matches("0.6 0.75 0.86 rg").count(), 1);
+
+    // Now select One-A (index 0)
+    let mut doc = doc;
+    set_value(&mut doc, "D_dup", &FieldValue::ChoiceIndices(vec![0])).unwrap();
+    let doc = reopen(&doc);
+    let all = fields(&doc);
+    let d_dup = field(&all, "D_dup");
+    assert_eq!(d_dup.indices, [0], "selection of One-A is saved");
+    assert_eq!(d_dup.display_value(), "One-A");
+    let app_stream = ap(&doc, &d_dup.widgets[0]);
+    assert_eq!(app_stream.matches("0.6 0.75 0.86 rg").count(), 1);
+}
+
+#[test]
+fn single_select_list_box_with_array_v_is_lenient_and_highlights_first_only() {
+    // Repro 2 from #4531:
+    // /Opt [[(TW) (Taiwan)] [(JP) (Japan)] [(US) (United States)]] /V [(TW) (JP)]
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R] /NeedAppearances true /DA (/Helv 11 Tf 0 g) /DR << /Font << /Helv 5 0 R >> >> >> >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [4 0 R] >>".into(),
+        "<< /Type /Annot /Subtype /Widget /F 4 /P 3 0 R /FT /Ch /T (H_twovals) /Ff 0 /Opt [[(TW) (Taiwan)] [(JP) (Japan)] [(US) (United States)]] /V [(TW) (JP)] /Rect [330 500 520 544] >>".into(),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
+    ];
+    let doc = document(&objs);
+    let all = fields(&doc);
+    let h = field(&all, "H_twovals");
+    assert_eq!(h.indices, [0], "only first value (TW) is retained for single-select");
+    assert_eq!(h.display_value(), "Taiwan");
+
+    // Appearance highlights Taiwan alone (one highlight rect, not two)
+    let drawn = with_field_appearances(&doc).expect("draws appearances");
+    let app_stream = ap(&drawn, &h.widgets[0]);
+    assert_eq!(app_stream.matches("0.6 0.75 0.86 rg").count(), 1, "only Taiwan highlighted, not both Taiwan and Japan");
+
+    // Picking a row writes a single string to /V
+    let mut doc = doc;
+    set_value(&mut doc, "H_twovals", &FieldValue::ChoiceIndices(vec![1])).unwrap();
+    let doc = reopen(&doc);
+    let all = fields(&doc);
+    let h = field(&all, "H_twovals");
+    assert_eq!(h.value, ["JP"]);
+    assert_eq!(h.indices, [1]);
+    assert_eq!(h.display_value(), "Japan");
+    let h_obj = doc.get(h.obj);
+    let raw_v = h_obj.as_dict().unwrap().get(b"V").unwrap();
+    assert!(matches!(raw_v, pdfcraft_cos::Object::String(_)), "/V was written as a string, not an array");
+}
+
+#[test]
+fn choice_field_v_takes_precedence_when_i_differs() {
+    // ISO 32000-2 Table 234: If the items identified by /I differ from those in /V, /V shall be used.
+    // /Opt [[(1) (One-A)] [(1) (One-B)] [(2) (Two)]] /V (2) /I [1]
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R] /NeedAppearances true /DA (/Helv 11 Tf 0 g) /DR << /Font << /Helv 5 0 R >> >> >> >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [4 0 R] >>".into(),
+        "<< /Type /Annot /Subtype /Widget /F 4 /P 3 0 R /FT /Ch /T (D_conflict) /Ff 0 /Opt [[(1) (One-A)] [(1) (One-B)] [(2) (Two)]] /V (2) /I [1] /Rect [330 600 520 644] >>".into(),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
+    ];
+    let doc = document(&objs);
+    let all = fields(&doc);
+    let d = field(&all, "D_conflict");
+    assert_eq!(d.indices, [2], "/V (2) overrides conflicting /I [1]");
+    assert_eq!(d.display_value(), "Two");
+    let drawn = with_field_appearances(&doc).expect("draws appearances");
+    let app_stream = ap(&drawn, &d.widgets[0]);
+    assert_eq!(app_stream.matches("0.6 0.75 0.86 rg").count(), 1, "Two alone is highlighted");
+}
+
+#[test]
+fn choice_indices_validation_and_errors() {
+    let mut doc = fixture();
+    // Out of bounds index
+    assert!(matches!(set_value(&mut doc, "country", &FieldValue::ChoiceIndices(vec![99])), Err(FormError::Invalid(_))));
+    // Multiple indices on single-select list
+    assert!(matches!(set_value(&mut doc, "country", &FieldValue::ChoiceIndices(vec![0, 1])), Err(FormError::Invalid(_))));
+}
+
+#[test]
 fn errors_are_specific_and_change_nothing() {
     let mut doc = fixture();
     assert_eq!(set_value(&mut doc, "nope", &FieldValue::Text("x".into())), Err(FormError::NoSuchField("nope".into())));

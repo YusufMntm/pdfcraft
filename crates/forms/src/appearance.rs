@@ -797,15 +797,17 @@ fn field_appearance_fit(doc: &Document, f: &Field, w: &Widget, values: &[String]
         FieldKind::List => {
             // Every option, one per line from the top (from `/TI`); selected ones highlighted.
             let fobj = doc.get(f.obj);
+            let raw_i = crate::indices_of(doc, fobj.as_dict().and_then(|d| d.get(b"I")));
+            let selected_indices = crate::resolve_choice_indices(&f.options, values, &raw_i, f.has(flags::MULTI_SELECT));
             let rows = list_rows_of(doc, &f.da, fobj.as_dict(), &wd);
             size = rows.size;
             let line = rows.row;
             let mut y = height - rows.inset;
-            for (export, display) in f.options.iter().skip(rows.top) {
+            for (idx, (_export, display)) in f.options.iter().enumerate().skip(rows.top) {
                 if y - line < 0.0 {
                     break;
                 }
-                if values.contains(export) {
+                if selected_indices.contains(&idx) {
                     c.push_str(&format!("0.6 0.75 0.86 rg\n{} {} {} {} re f\n", n(bw), n(y - line), n(width - 2.0 * bw), n(line)));
                 }
                 show(&mut body, pad, y - line + size * 0.25, display);

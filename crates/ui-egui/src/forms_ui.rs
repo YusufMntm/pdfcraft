@@ -255,31 +255,29 @@ pub(crate) fn page_input(
             let zoom = (r.height() as f64) / height_pt;
             let y_pt = (p.y - r.min.y) as f64 / zoom;
             let rows = w.list.unwrap_or(form_appearance::ListRows { top: 0, inset: 2.0, row: 12.0 * 1.15, size: 12.0 });
-            let picked_indices: Vec<usize> = f.value.iter().filter_map(|v| f.options.iter().position(|(e, _)| e == v)).collect();
-            let top = form_appearance::ListRows::top_showing(rows.top, &picked_indices, rows.visible(height_pt), f.options.len());
+            let top = form_appearance::ListRows::top_showing(rows.top, &f.indices, rows.visible(height_pt), f.options.len());
             if let Some(opt_idx) = rows.option_at(top, y_pt).filter(|&i| i < f.options.len()) {
-                let export = &f.options[opt_idx].0;
                 let ctrl = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
                 let shift = ui.input(|i| i.modifiers.shift);
                 let multi = f.has(field_flags::MULTI_SELECT);
-                let new_value = if multi && ctrl {
-                    let mut picked = f.value.clone();
-                    if let Some(pos) = picked.iter().position(|x| x == export) {
+                let new_indices = if multi && ctrl {
+                    let mut picked = f.indices.clone();
+                    if let Some(pos) = picked.iter().position(|&x| x == opt_idx) {
                         picked.remove(pos);
                     } else {
-                        picked.push(export.clone());
+                        picked.push(opt_idx);
+                        picked.sort_unstable();
                     }
-                    FieldValue::Choice(picked)
-                } else if multi && shift && !f.value.is_empty() {
-                    let anchor = f.value.last().and_then(|last| f.options.iter().position(|(e, _)| e == last)).unwrap_or(opt_idx);
+                    picked
+                } else if multi && shift && !f.indices.is_empty() {
+                    let anchor = f.indices.last().copied().unwrap_or(opt_idx);
                     let (min, max) = (anchor.min(opt_idx), anchor.max(opt_idx));
-                    let picked = f.options[min..=max].iter().map(|(e, _)| e.clone()).collect();
-                    FieldValue::Choice(picked)
+                    (min..=max).collect()
                 } else {
-                    FieldValue::Choice(vec![export.clone()])
+                    vec![opt_idx]
                 };
-                if new_value != FieldValue::Choice(f.value.clone()) {
-                    view.pending_edit = Some(Edit::SetFieldValue { name: f.name.clone(), value: new_value });
+                if new_indices != f.indices {
+                    view.pending_edit = Some(Edit::SetFieldValue { name: f.name.clone(), value: FieldValue::ChoiceIndices(new_indices) });
                 }
             }
         }
@@ -554,19 +552,18 @@ fn paint_unbaked_widget(painter: &egui::Painter, xf: &PageXform, f: &FormField, 
             let zoom = (xf.rect.width() / unrotated_w.max(1.0)) as f64;
             let rows = w.list.unwrap_or(form_appearance::ListRows { top: 0, inset: 2.0, row: 12.0 * 1.15, size: 12.0 });
             let height_pt = if matches!(w.rotation, 90 | 270) { (w.rect[2] - w.rect[0]).max(1.0) } else { (w.rect[3] - w.rect[1]).max(1.0) };
-            let picked_indices: Vec<usize> = f.value.iter().filter_map(|v| f.options.iter().position(|(e, _)| e == v)).collect();
-            let top = form_appearance::ListRows::top_showing(rows.top, &picked_indices, rows.visible(height_pt), f.options.len());
+            let top = form_appearance::ListRows::top_showing(rows.top, &f.indices, rows.visible(height_pt), f.options.len());
             let font_size = (rows.size * zoom).clamp(6.0, 64.0) as f32;
             let row_h = (rows.row * zoom) as f32;
             let inset = (rows.inset * zoom) as f32;
             let p = painter.with_clip_rect(r);
             let mut y = r.min.y + inset;
-            for (export, display) in f.options.iter().skip(top) {
+            for (idx, (_export, display)) in f.options.iter().enumerate().skip(top) {
                 if y + row_h > r.max.y {
                     break;
                 }
                 let row_rect = Rect::from_min_size(egui::pos2(r.min.x + 1.0, y), egui::vec2(r.width() - 2.0, row_h));
-                if f.value.contains(export) {
+                if f.indices.contains(&idx) {
                     p.rect_filled(row_rect, CornerRadius::ZERO, Color32::from_rgb(0x99, 0xC0, 0xDC));
                 }
                 p.text(
@@ -775,10 +772,10 @@ pub(crate) fn overlay(
                         ui.set_min_width(rect.width().max(160.0));
                         ui.label(egui::RichText::new(&f.name).small().color(t.text_faint));
                         egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
-                            for (export, display) in &f.options {
-                                let on = f.value.first() == Some(export);
+                            for (idx, (_export, display)) in f.options.iter().enumerate() {
+                                let on = f.indices.contains(&idx);
                                 if ui.selectable_label(on, display).clicked() {
-                                    edit = Some(Edit::SetFieldValue { name: f.name.clone(), value: FieldValue::Choice(vec![export.clone()]) });
+                                    edit = Some(Edit::SetFieldValue { name: f.name.clone(), value: FieldValue::ChoiceIndices(vec![idx]) });
                                     close = true;
                                 }
                             }
@@ -814,11 +811,10 @@ pub(crate) fn overlay(
             } else if tab {
                 next = Some(!shift);
             } else if (up || down) && !f.options.is_empty() {
-                let current_idx = f.value.last().and_then(|v| f.options.iter().position(|(e, _)| e == v)).unwrap_or(0);
+                let current_idx = f.indices.last().copied().unwrap_or(0);
                 let next_idx = if up { current_idx.saturating_sub(1) } else { (current_idx + 1).min(f.options.len().saturating_sub(1)) };
-                if next_idx != current_idx && next_idx < f.options.len() {
-                    let export = f.options[next_idx].0.clone();
-                    edit = Some(Edit::SetFieldValue { name: f.name.clone(), value: FieldValue::Choice(vec![export]) });
+                if (f.indices.as_slice() != [next_idx]) && next_idx < f.options.len() {
+                    edit = Some(Edit::SetFieldValue { name: f.name.clone(), value: FieldValue::ChoiceIndices(vec![next_idx]) });
                 }
             }
             let clicked_away = ctx.input(|i| i.pointer.any_click()) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| rect.contains(p));
