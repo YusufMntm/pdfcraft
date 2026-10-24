@@ -937,6 +937,7 @@ pub enum OpenOutcome {
 }
 
 impl PdfCraftApp {
+    /// Constructs a new [`PdfCraftApp`] with default session and user interface state.
     pub fn new() -> Self {
         Self {
             session: Session::new(),
