@@ -130,6 +130,7 @@ pub struct CommandSpec {
     pub icon: &'static str,
 }
 
+/// Shorthand to construct a [`CommandSpec`] that stays active in text fields.
 const fn c(
     id: &'static str,
     label: &'static str,
