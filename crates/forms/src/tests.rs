@@ -1262,6 +1262,37 @@ fn choice_indices_validation_and_errors() {
     assert!(matches!(set_value(&mut doc, "country", &FieldValue::ChoiceIndices(vec![0, 1])), Err(FormError::Invalid(_))));
 }
 
+/// A combo box whose options share an export value renders the display text corresponding to `/I`.
+#[test]
+fn combo_box_options_sharing_export_value_respects_i() {
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [5 0 R] >>".into(),
+        "<< /Fields [5 0 R] /NeedAppearances true >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Ch /Ff 131072 /T (combo_dup) /Rect [50 500 250 520] /DA (/Helv 12 Tf 0 g) /Opt [[(1) (One-A)] [(1) (One-B)] [(2) (Two)]] /V (1) /I [1] >>".into(),
+    ];
+    let mut doc = document(&objs);
+    let all = fields(&doc);
+    let d = field(&all, "combo_dup");
+    assert_eq!(d.indices, [1], "/I [1] selects One-B");
+    assert_eq!(d.display_value(), "One-B");
+    let drawn = with_field_appearances(&doc).expect("draws appearances");
+    let app_stream = ap(&drawn, &d.widgets[0]);
+    assert!(app_stream.contains("(One-B) Tj"), "appearance draws One-B, not One-A");
+    assert!(!app_stream.contains("(One-A) Tj"));
+
+    // Setting choice index 0 redraws One-A
+    set_value(&mut doc, "combo_dup", &FieldValue::ChoiceIndices(vec![0])).expect("set index 0");
+    let all2 = fields(&doc);
+    let d2 = field(&all2, "combo_dup");
+    assert_eq!(d2.indices, [0]);
+    assert_eq!(d2.display_value(), "One-A");
+    let app_stream2 = ap(&doc, &d2.widgets[0]);
+    assert!(app_stream2.contains("(One-A) Tj"));
+    assert!(!app_stream2.contains("(One-B) Tj"));
+}
+
 #[test]
 fn errors_are_specific_and_change_nothing() {
     let mut doc = fixture();
