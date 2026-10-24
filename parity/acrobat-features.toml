@@ -1599,6 +1599,7 @@ status = "shipped"
 commands = ["view.rulers"]
 tools = []
 evidence = [
+    "crates/ui-egui/tests/it/viewer.rs::rulers_end_to_end_cursor_tracking_and_rotation",
     "crates/ui-egui/tests/it/viewer.rs::rulers_toggle_and_track_cursor_position",
     "crates/ui-egui/src/rulers.rs::ruler_step_calculation_and_tick_formatting",
 ]
