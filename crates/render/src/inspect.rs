@@ -1690,12 +1690,12 @@ impl<'a> Inspector<'a> {
                 Some(LinkTarget::Hide { targets, hide })
             }
             Some("ResetForm") => {
-                let (fields, budget_exhausted) = self.reset_form_targets(a, text_budget);
+                let (fields, incomplete) = self.reset_form_targets(a, text_budget);
                 let exclude = a.get(b"Flags").ok().and_then(|f| self.resolve(f).as_i64().ok()).unwrap_or(0) & 1 != 0;
-                // In include mode (Flags bit 1 clear), an explicit /Fields entry must resolve at least one
-                // field target and must not have exhausted the decode budget. Otherwise, omitting or truncating
-                // fields would invert semantics into resetting the entire form.
-                if !exclude && a.get(b"Fields").is_ok() && (fields.is_empty() || budget_exhausted) {
+                // If /Fields is present:
+                // - In include mode (Flags bit 1 clear), an incomplete or unresolvable list must not reset all fields.
+                // - In exclude mode (Flags bit 1 set), an incomplete list must not omit excluded fields (which would reset them).
+                if a.get(b"Fields").is_ok() && (incomplete || (!exclude && fields.is_empty())) {
                     return None;
                 }
                 Some(LinkTarget::ResetForm { fields, exclude })
@@ -1742,18 +1742,21 @@ impl<'a> Inspector<'a> {
         }
     }
 
-    /// The field names listed in a ResetForm action (§12.7.6.3, Table 241), and whether the decode budget ran out.
+    /// The field names listed in a ResetForm action (§12.7.6.3, Table 241), and whether the target list is incomplete.
     fn reset_form_targets(&self, a: &Dictionary, text_budget: &mut usize) -> (Vec<String>, bool) {
         let Ok(f) = a.get(b"Fields") else { return (Vec::new(), false) };
         let mut fields = Vec::new();
-        let mut budget_exhausted = false;
+        let mut incomplete = false;
         match self.resolve(f) {
             Object::Array(items) => {
+                if items.len() > MAX_ACTION_TARGETS {
+                    incomplete = true;
+                }
                 for item in items.iter().take(MAX_ACTION_TARGETS) {
                     if let Some(field) = self.field_target_name(item, text_budget) {
                         fields.push(field);
                     } else if *text_budget == 0 {
-                        budget_exhausted = true;
+                        incomplete = true;
                         break;
                     }
                 }
@@ -1762,11 +1765,11 @@ impl<'a> Inspector<'a> {
                 if let Some(field) = self.field_target_name(f, text_budget) {
                     fields.push(field);
                 } else if *text_budget == 0 {
-                    budget_exhausted = true;
+                    incomplete = true;
                 }
             }
         }
-        (fields, budget_exhausted)
+        (fields, incomplete)
     }
 
     /// Resolves an action target object (string, name, or indirect reference) to a field name.
