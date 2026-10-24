@@ -1,7 +1,8 @@
 //! Canvas rulers along the top and left of the document viewport (`view.rulers`).
 //!
 //! Rulers provide dynamic measurement markings (pt, in, mm, cm) anchored to the active page
-//! origin `(0, 0)`, and show guide indicators that track the cursor position in real time.
+//! origin `(0, 0)` under all view rotations, and show guide indicators that track the cursor
+//! position in real time.
 
 use crate::theme::{self, Tokens};
 use egui::{Align2, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, pos2, vec2};
@@ -12,15 +13,15 @@ pub const RULER_THICKNESS: f32 = 18.0;
 /// Calculates the major tick interval and number of minor subdivisions for the ruler.
 ///
 /// Returns a tuple of `(major_step, minor_subdivisions)` in the specified [`crate::units::Unit`],
-/// adapted dynamically to `zoom` such that major tick labels are comfortably readable
-/// and neither too crowded nor too sparse on screen.
-pub fn calculate_ruler_step(zoom: f32, unit: crate::units::Unit) -> (f64, usize) {
-    let z = if zoom.is_finite() && zoom > 0.001 { zoom as f64 } else { 1.0 };
+/// adapted dynamically to `screen_scale` (in logical screen pixels per PDF point) such that major
+/// tick labels are comfortably readable and neither too crowded nor too sparse on screen.
+pub fn calculate_ruler_step(screen_scale: f32, unit: crate::units::Unit) -> (f64, usize) {
+    let s = if screen_scale.is_finite() && screen_scale > 0.001 { screen_scale as f64 } else { 1.0 };
     let per_point = unit.per_point();
     let per_point = if per_point.is_finite() && per_point > 0.0 { per_point } else { 1.0 };
 
-    // Physical screen pixels per 1 unit.
-    let screen_pixels_per_unit = (1.0 / per_point) * z;
+    // Physical screen pixels per 1 unit = (points per unit) * (screen pixels per point).
+    let screen_pixels_per_unit = (1.0 / per_point) * s;
     if !screen_pixels_per_unit.is_finite() || screen_pixels_per_unit <= 0.0 {
         return (10.0, 10);
     }
@@ -92,17 +93,36 @@ pub fn draw_rulers(
     let left_rect =
         Rect::from_min_max(pos2(viewport.min.x, viewport.min.y + RULER_THICKNESS), pos2(viewport.min.x + RULER_THICKNESS, viewport.max.y));
 
+    // Screen scale: physical screen pixels per PDF page point.
+    let screen_scale = (view.zoom * crate::canvas::PT).max(0.001);
+
+    // Compute origin and axis directions using page transformation to support 0, 90, 180, 270 rotations.
+    let (origin, dir_x, dir_y) = match view.page_xform(view.current).or_else(|| {
+        let pages = view.visible_page_rects();
+        pages.first().and_then(|(p, _)| view.page_xform(*p))
+    }) {
+        Some(xf) => {
+            let o = xf.norm_to_screen(0.0, 0.0);
+            let u_vec = xf.norm_to_screen(1.0, 0.0) - o;
+            let v_vec = xf.norm_to_screen(0.0, 1.0) - o;
+            let dx = if u_vec.x.abs() >= v_vec.x.abs() { if u_vec.x >= 0.0 { 1.0 } else { -1.0 } } else { if v_vec.x >= 0.0 { 1.0 } else { -1.0 } };
+            let dy = if v_vec.y.abs() >= u_vec.y.abs() { if v_vec.y >= 0.0 { 1.0 } else { -1.0 } } else { if u_vec.y >= 0.0 { 1.0 } else { -1.0 } };
+            (o, dx, dy)
+        }
+        None => (viewport.min, 1.0, 1.0),
+    };
+
     // Draw the corner unit square.
     let next_unit = draw_corner_box(ui, corner_rect, units, t);
 
     // Draw top horizontal ruler.
     if top_rect.width() > 0.0 {
-        draw_top_ruler(ui, view, top_rect, units, t);
+        draw_top_ruler(ui, top_rect, origin.x, dir_x, screen_scale, units, t);
     }
 
     // Draw left vertical ruler.
     if left_rect.height() > 0.0 {
-        draw_left_ruler(ui, view, left_rect, units, t);
+        draw_left_ruler(ui, left_rect, origin.y, dir_y, screen_scale, units, t);
     }
 
     // Draw cursor tracking guides.
@@ -142,28 +162,37 @@ fn draw_corner_box(ui: &mut egui::Ui, rect: Rect, units: crate::units::Unit, t: 
 }
 
 /// Draws the horizontal top ruler with ticks and numerical labels anchored to the active page origin.
-fn draw_top_ruler(ui: &mut egui::Ui, view: &crate::canvas::DocView, rect: Rect, units: crate::units::Unit, t: &Tokens) {
+fn draw_top_ruler(ui: &mut egui::Ui, rect: Rect, origin_x: f32, dir_x: f64, screen_scale: f32, units: crate::units::Unit, t: &Tokens) {
     let painter = ui.painter().with_clip_rect(rect);
     painter.rect_filled(rect, CornerRadius::ZERO, t.chrome);
     painter.line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(1.0, t.divider));
 
-    let zoom = if view.zoom.is_finite() && view.zoom > 0.001 { view.zoom } else { 1.0 };
     let per_point = if units.per_point().is_finite() && units.per_point() > 0.0 { units.per_point() } else { 1.0 };
-    let (step, subdivisions) = calculate_ruler_step(zoom, units);
+    let (step, subdivisions) = calculate_ruler_step(screen_scale, units);
     if step <= 0.0 || subdivisions == 0 {
         return;
     }
 
-    let origin_x = view.page_screen_rect(view.current).or_else(|| view.visible_page_rects().first().map(|(_, r)| *r)).map_or(rect.min.x, |r| r.min.x);
-
-    let min_val = (((rect.min.x - origin_x) / zoom) as f64 * per_point).clamp(-1_000_000.0, 1_000_000.0);
-    let max_val = (((rect.max.x - origin_x) / zoom) as f64 * per_point).clamp(-1_000_000.0, 1_000_000.0);
+    let (val_at_min_x, val_at_max_x) = if dir_x >= 0.0 {
+        (
+            (((rect.min.x - origin_x) / screen_scale) as f64 * per_point).clamp(-1_000_000.0, 1_000_000.0),
+            (((rect.max.x - origin_x) / screen_scale) as f64 * per_point).clamp(-1_000_000.0, 1_000_000.0),
+        )
+    } else {
+        (
+            (((origin_x - rect.max.x) / screen_scale) as f64 * per_point).clamp(-1_000_000.0, 1_000_000.0),
+            (((origin_x - rect.min.x) / screen_scale) as f64 * per_point).clamp(-1_000_000.0, 1_000_000.0),
+        )
+    };
+    let min_val = val_at_min_x.min(val_at_max_x);
+    let max_val = val_at_min_x.max(val_at_max_x);
 
     let mut tick = (min_val / step).floor() * step;
     let mut count = 0;
     while tick <= max_val + step && count < 500 {
         count += 1;
-        let screen_x = origin_x + ((tick / per_point) as f32 * zoom);
+        let screen_x =
+            if dir_x >= 0.0 { origin_x + ((tick / per_point) as f32 * screen_scale) } else { origin_x - ((tick / per_point) as f32 * screen_scale) };
         if screen_x >= rect.min.x - 1.0 && screen_x <= rect.max.x + 1.0 {
             // Major tick line.
             painter.line_segment([pos2(screen_x, rect.max.y - 7.0), pos2(screen_x, rect.max.y)], Stroke::new(1.0, t.text_faint));
@@ -175,7 +204,11 @@ fn draw_top_ruler(ui: &mut egui::Ui, view: &crate::canvas::DocView, rect: Rect, 
         let sub_step = step / (subdivisions as f64);
         for sub in 1..subdivisions {
             let sub_val = tick + (sub as f64) * sub_step;
-            let sub_x = origin_x + ((sub_val / per_point) as f32 * zoom);
+            let sub_x = if dir_x >= 0.0 {
+                origin_x + ((sub_val / per_point) as f32 * screen_scale)
+            } else {
+                origin_x - ((sub_val / per_point) as f32 * screen_scale)
+            };
             if sub_x >= rect.min.x && sub_x <= rect.max.x {
                 let h = if sub * 2 == subdivisions { 4.5 } else { 3.0 };
                 painter.line_segment([pos2(sub_x, rect.max.y - h), pos2(sub_x, rect.max.y)], Stroke::new(1.0, t.divider));
@@ -187,28 +220,37 @@ fn draw_top_ruler(ui: &mut egui::Ui, view: &crate::canvas::DocView, rect: Rect, 
 }
 
 /// Draws the vertical left ruler with ticks and rotated numerical labels anchored to the active page origin.
-fn draw_left_ruler(ui: &mut egui::Ui, view: &crate::canvas::DocView, rect: Rect, units: crate::units::Unit, t: &Tokens) {
+fn draw_left_ruler(ui: &mut egui::Ui, rect: Rect, origin_y: f32, dir_y: f64, screen_scale: f32, units: crate::units::Unit, t: &Tokens) {
     let painter = ui.painter().with_clip_rect(rect);
     painter.rect_filled(rect, CornerRadius::ZERO, t.chrome);
     painter.line_segment([rect.right_top(), rect.right_bottom()], Stroke::new(1.0, t.divider));
 
-    let zoom = if view.zoom.is_finite() && view.zoom > 0.001 { view.zoom } else { 1.0 };
     let per_point = if units.per_point().is_finite() && units.per_point() > 0.0 { units.per_point() } else { 1.0 };
-    let (step, subdivisions) = calculate_ruler_step(zoom, units);
+    let (step, subdivisions) = calculate_ruler_step(screen_scale, units);
     if step <= 0.0 || subdivisions == 0 {
         return;
     }
 
-    let origin_y = view.page_screen_rect(view.current).or_else(|| view.visible_page_rects().first().map(|(_, r)| *r)).map_or(rect.min.y, |r| r.min.y);
-
-    let min_val = (((rect.min.y - origin_y) / zoom) as f64 * per_point).clamp(-1_000_000.0, 1_000_000.0);
-    let max_val = (((rect.max.y - origin_y) / zoom) as f64 * per_point).clamp(-1_000_000.0, 1_000_000.0);
+    let (val_at_min_y, val_at_max_y) = if dir_y >= 0.0 {
+        (
+            (((rect.min.y - origin_y) / screen_scale) as f64 * per_point).clamp(-1_000_000.0, 1_000_000.0),
+            (((rect.max.y - origin_y) / screen_scale) as f64 * per_point).clamp(-1_000_000.0, 1_000_000.0),
+        )
+    } else {
+        (
+            (((origin_y - rect.max.y) / screen_scale) as f64 * per_point).clamp(-1_000_000.0, 1_000_000.0),
+            (((origin_y - rect.min.y) / screen_scale) as f64 * per_point).clamp(-1_000_000.0, 1_000_000.0),
+        )
+    };
+    let min_val = val_at_min_y.min(val_at_max_y);
+    let max_val = val_at_min_y.max(val_at_max_y);
 
     let mut tick = (min_val / step).floor() * step;
     let mut count = 0;
     while tick <= max_val + step && count < 500 {
         count += 1;
-        let screen_y = origin_y + ((tick / per_point) as f32 * zoom);
+        let screen_y =
+            if dir_y >= 0.0 { origin_y + ((tick / per_point) as f32 * screen_scale) } else { origin_y - ((tick / per_point) as f32 * screen_scale) };
         if screen_y >= rect.min.y - 1.0 && screen_y <= rect.max.y + 1.0 {
             // Major tick line.
             painter.line_segment([pos2(rect.max.x - 7.0, screen_y), pos2(rect.max.x, screen_y)], Stroke::new(1.0, t.text_faint));
@@ -222,7 +264,11 @@ fn draw_left_ruler(ui: &mut egui::Ui, view: &crate::canvas::DocView, rect: Rect,
         let sub_step = step / (subdivisions as f64);
         for sub in 1..subdivisions {
             let sub_val = tick + (sub as f64) * sub_step;
-            let sub_y = origin_y + ((sub_val / per_point) as f32 * zoom);
+            let sub_y = if dir_y >= 0.0 {
+                origin_y + ((sub_val / per_point) as f32 * screen_scale)
+            } else {
+                origin_y - ((sub_val / per_point) as f32 * screen_scale)
+            };
             if sub_y >= rect.min.y && sub_y <= rect.max.y {
                 let w = if sub * 2 == subdivisions { 4.5 } else { 3.0 };
                 painter.line_segment([pos2(rect.max.x - w, sub_y), pos2(rect.max.x, sub_y)], Stroke::new(1.0, t.divider));
@@ -268,22 +314,23 @@ fn draw_cursor_guides(ui: &mut egui::Ui, pos: Pos2, top_rect: Rect, left_rect: R
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::canvas::PT;
     use crate::units::Unit;
 
     #[test]
     fn ruler_step_calculation_and_tick_formatting() {
-        // Points at 100% zoom (1 pt/px) -> target ~50 pt -> nice step 50.0 pt with 5 subdivisions
-        let (step_pt, sub_pt) = calculate_ruler_step(1.0, Unit::Points);
+        // Points at 100% zoom (1.0 * PT = 96/72 px/pt) -> target ~50 / (96/72) = 37.5 pt -> nice step 50.0 pt with 5 subdivisions
+        let (step_pt, sub_pt) = calculate_ruler_step(1.0 * PT, Unit::Points);
         assert!((step_pt - 50.0).abs() < 1e-4, "expected 50 pt step, got {step_pt}");
         assert_eq!(sub_pt, 5);
 
-        // Inches at 100% zoom (72 px/in) -> target ~50/72 = 0.69 in -> nice step 1.0 in with 8 subdivisions
-        let (step_in, sub_in) = calculate_ruler_step(1.0, Unit::Inches);
+        // Inches at 100% zoom (72 pt/in * 96/72 = 96 px/in) -> target ~50/96 = 0.52 in -> nice step 1.0 in with 8 subdivisions
+        let (step_in, sub_in) = calculate_ruler_step(1.0 * PT, Unit::Inches);
         assert!((step_in - 1.0).abs() < 1e-4, "expected 1.0 in step, got {step_in}");
         assert_eq!(sub_in, 8);
 
-        // Millimetres at 100% zoom (2.8346 px/mm) -> target ~17.6 mm -> nice step 20.0 mm with 4 subdivisions
-        let (step_mm, sub_mm) = calculate_ruler_step(1.0, Unit::Millimetres);
+        // Millimetres at 100% zoom (2.8346 pt/mm * 96/72 = 3.7795 px/mm) -> target ~50 / 3.7795 = 13.2 mm -> nice step 20.0 mm with 4 subdivisions
+        let (step_mm, sub_mm) = calculate_ruler_step(1.0 * PT, Unit::Millimetres);
         assert!((step_mm - 20.0).abs() < 1e-4, "expected 20.0 mm step, got {step_mm}");
         assert_eq!(sub_mm, 4);
 
