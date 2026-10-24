@@ -749,7 +749,7 @@ fn field_appearance_fit(doc: &Document, f: &Field, w: &Widget, values: &[String]
     let da = parse_da(wd.get(b"DA").and_then(|o| doc.resolve(o).as_string().map(|s| s.to_text())).as_deref().unwrap_or(&f.da));
     let text: String = if f.kind == FieldKind::Combo {
         let raw_i = crate::indices_of(doc, doc.get(f.obj).as_dict().and_then(|d| d.get(b"I")));
-        let picked = crate::resolve_choice_indices(&f.options, raw_values, &raw_i, false);
+        let picked = if values == raw_values { crate::resolve_choice_indices(&f.options, raw_values, &raw_i, false) } else { Vec::new() };
         match picked.first().and_then(|&i| f.options.get(i)) {
             Some((_, display)) => display.clone(),
             None => {
