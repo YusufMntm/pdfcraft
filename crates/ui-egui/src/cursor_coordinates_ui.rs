@@ -34,6 +34,14 @@ pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
         .show(ctx, |ui| {
             let pointer = ctx.input(|i| i.pointer.latest_pos());
 
+            let page_covered = app.dialog.is_some()
+                || app.close_request.is_some()
+                || app.palette_open
+                || app.password_prompt.is_some()
+                || app.pending_link.is_some()
+                || app.pending_remote_link.is_some()
+                || app.updates.open;
+
             let active = app.active_ids().and_then(|(v_idx, doc_id)| {
                 let doc = app.session.get(doc_id)?;
                 let view = app.views.get(v_idx)?;
@@ -66,7 +74,7 @@ pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
                 if let Some((view, doc)) = active {
                     let page_hit = pointer.and_then(|pos| {
                         if !view.viewport_rect().contains(pos)
-                            || app.dialog.is_some()
+                            || page_covered
                             || ctx.layer_id_at(pos).is_some_and(|l| l == ui.layer_id() || l.order > Order::Middle)
                         {
                             return None;
