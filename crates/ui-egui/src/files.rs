@@ -107,6 +107,7 @@ impl FilePurpose {
 pub struct PickTarget {
     pub(crate) doc: DocId,
     generation: Option<u64>,
+    pub(crate) gap: Option<usize>,
 }
 
 /// Files picked asynchronously in a browser, waiting for the next frame (see
@@ -440,7 +441,8 @@ impl PdfCraftApp {
 
     /// `doc` as it is now, for a pick that will edit it.
     pub(crate) fn pick_target(&self, doc: Option<DocId>) -> Option<PickTarget> {
-        doc.map(|doc| PickTarget { doc, generation: self.session.get(doc).map(|d| d.edit_generation()) })
+        let gap = doc.and_then(|id| self.views.iter().find(|v| v.id == id).and_then(|v| v.insert_at));
+        doc.map(|doc| PickTarget { doc, generation: self.session.get(doc).map(|d| d.edit_generation()), gap })
     }
 
     /// Whether a pick for `target` may still be used: the document is still the active one and
@@ -463,6 +465,7 @@ impl PdfCraftApp {
             if files.is_empty() {
                 if let Some(target) = target
                     && let Some(view) = self.views.iter_mut().find(|v| v.id == target.doc)
+                    && view.insert_at == target.gap
                 {
                     view.insert_at = None;
                 }

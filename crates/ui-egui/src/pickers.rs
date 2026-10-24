@@ -272,6 +272,7 @@ impl PdfCraftApp {
             if paths.is_empty() {
                 if let Some(target) = target
                     && let Some(view) = self.views.iter_mut().find(|v| v.id == target.doc)
+                    && view.insert_at == target.gap
                 {
                     view.insert_at = None;
                 }
