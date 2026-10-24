@@ -54,6 +54,8 @@ const MAX_LINK_ATTACHMENT_TEXT_BYTES: usize = 16 << 20;
 const MAX_ACTION_CHAIN: usize = 64;
 /// Maximum number of field or annotation targets parsed from a single Hide or ResetForm action.
 const MAX_ACTION_TARGETS: usize = 256;
+/// Maximum number of action nodes visited while inspecting a `/Next` action chain.
+const MAX_ACTION_VISITS: usize = 1024;
 
 /// Whether a link target (or any action chained within it) is a JavaScript action.
 fn has_javascript_target(target: &LinkTarget) -> bool {
@@ -1574,7 +1576,8 @@ impl<'a> Inspector<'a> {
             if let Object::Reference(id) = a_obj {
                 active_stack.insert(*id);
             }
-            self.collect_actions(a, &mut targets, &mut active_stack, text_budget, 0);
+            let mut visits = 0;
+            self.collect_actions(a, &mut targets, &mut active_stack, text_budget, &mut visits, 0);
             match targets.len() {
                 0 => return None,
                 1 => targets.swap_remove(0),
@@ -1585,18 +1588,20 @@ impl<'a> Inspector<'a> {
     }
 
     /// Collect the action in `a` and any actions chained after it via `/Next` (§12.6.2, Table 196),
-    /// bounded to prevent cycles.
+    /// bounded to prevent cycles and exponential DAG fan-out.
     fn collect_actions(
         &self,
         a: &'a Dictionary,
         targets: &mut Vec<LinkTarget>,
         active_stack: &mut HashSet<ObjectId>,
         text_budget: &mut usize,
+        visits: &mut usize,
         depth: usize,
     ) {
-        if depth >= MAX_ACTION_CHAIN || targets.len() >= MAX_ACTION_CHAIN {
+        if depth >= MAX_ACTION_CHAIN || targets.len() >= MAX_ACTION_CHAIN || *visits >= MAX_ACTION_VISITS {
             return;
         }
+        *visits += 1;
         if let Some(target) = self.single_action(a, text_budget) {
             targets.push(target);
         }
@@ -1607,11 +1612,11 @@ impl<'a> Inspector<'a> {
             }
             match self.resolve(next) {
                 Object::Dictionary(d) => {
-                    self.collect_actions(d, targets, active_stack, text_budget, depth + 1);
+                    self.collect_actions(d, targets, active_stack, text_budget, visits, depth + 1);
                 }
                 Object::Array(items) => {
                     for item in items.iter().take(MAX_ACTION_CHAIN) {
-                        if targets.len() >= MAX_ACTION_CHAIN {
+                        if targets.len() >= MAX_ACTION_CHAIN || *visits >= MAX_ACTION_VISITS {
                             break;
                         }
                         if let Object::Reference(child_id) = item {
@@ -1619,11 +1624,11 @@ impl<'a> Inspector<'a> {
                                 continue;
                             }
                             if let Some(d) = self.dict(item) {
-                                self.collect_actions(d, targets, active_stack, text_budget, depth + 1);
+                                self.collect_actions(d, targets, active_stack, text_budget, visits, depth + 1);
                             }
                             active_stack.remove(child_id);
                         } else if let Some(d) = self.dict(item) {
-                            self.collect_actions(d, targets, active_stack, text_budget, depth + 1);
+                            self.collect_actions(d, targets, active_stack, text_budget, visits, depth + 1);
                         }
                     }
                 }
@@ -1633,11 +1638,11 @@ impl<'a> Inspector<'a> {
         } else {
             match self.resolve(next) {
                 Object::Dictionary(d) => {
-                    self.collect_actions(d, targets, active_stack, text_budget, depth + 1);
+                    self.collect_actions(d, targets, active_stack, text_budget, visits, depth + 1);
                 }
                 Object::Array(items) => {
                     for item in items.iter().take(MAX_ACTION_CHAIN) {
-                        if targets.len() >= MAX_ACTION_CHAIN {
+                        if targets.len() >= MAX_ACTION_CHAIN || *visits >= MAX_ACTION_VISITS {
                             break;
                         }
                         if let Object::Reference(child_id) = item {
@@ -1645,11 +1650,11 @@ impl<'a> Inspector<'a> {
                                 continue;
                             }
                             if let Some(d) = self.dict(item) {
-                                self.collect_actions(d, targets, active_stack, text_budget, depth + 1);
+                                self.collect_actions(d, targets, active_stack, text_budget, visits, depth + 1);
                             }
                             active_stack.remove(child_id);
                         } else if let Some(d) = self.dict(item) {
-                            self.collect_actions(d, targets, active_stack, text_budget, depth + 1);
+                            self.collect_actions(d, targets, active_stack, text_budget, visits, depth + 1);
                         }
                     }
                 }
@@ -3756,6 +3761,28 @@ trailer << /Root 1 0 R >>
                 LinkTarget::Named("LastPage".into()),
             ]
         );
+    }
+
+    /// A fan-out `/Next` DAG of action dictionaries with no `/S` does not hang or trigger exponential recursion.
+    #[test]
+    fn links_read_next_fanout_dag_is_bounded() {
+        let mut pdf = b"%PDF-1.7\n\
+            1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n\
+            2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 400] >> endobj\n\
+            3 0 obj << /Type /Page /Parent 2 0 R /Annots [10 0 R] >> endobj\n\
+            10 0 obj << /Type /Annot /Subtype /Link /Rect [0 0 10 10] /A 11 0 R >> endobj\n"
+            .to_vec();
+        // 20 levels of fan-out: each level k has /Next [k+1 0 R k+1 0 R] without /S.
+        // Without visit bounding, this would be 2^20 = 1,048,576 recursive calls.
+        for k in 11..31 {
+            pdf.extend_from_slice(format!("{k} 0 obj << /Next [{} 0 R {} 0 R] >> endobj\n", k + 1, k + 1).as_bytes());
+        }
+        pdf.extend_from_slice(
+            b"31 0 obj << /S /Named /N /NextPage >> endobj\n\
+            trailer << /Root 1 0 R >>\n%%EOF",
+        );
+        let info = inspect(Arc::new(pdf), None).expect("opens quickly");
+        assert_eq!(info.links.len(), 1);
     }
 
     /// #4168: a Launch action naming a `.pdf` file is read as the link to that file it amounts
