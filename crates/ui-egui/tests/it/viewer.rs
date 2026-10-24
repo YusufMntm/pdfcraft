@@ -814,6 +814,16 @@ fn click_at(h: &mut Harness<'static, PdfCraftApp>, p: egui::Pos2) {
     h.run_steps(3);
 }
 
+/// Click with the pointer at `p` while carrying `modifiers`.
+fn click_modifiers_at(h: &mut Harness<'static, PdfCraftApp>, p: egui::Pos2, modifiers: egui::Modifiers) {
+    h.hover_at(p);
+    h.run_steps(1);
+    h.event(egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: true, modifiers });
+    h.run_steps(1);
+    h.event(egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: false, modifiers });
+    h.run_steps(3);
+}
+
 /// Test that dynamic zoom zooms in when dragging upward, zooms out when dragging downward,
 /// zooms in on click, and zooms out on Shift-click.
 #[test]
@@ -846,11 +856,26 @@ fn dynamic_zoom_drags_up_to_zoom_in_and_down_to_zoom_out() {
     let after_click = h.state().views[i].zoom;
     assert!((after_click - before_click * 1.5).abs() < 0.05, "click zooms in by 1.5x: {before_click} -> {after_click}");
 
-    // 5. Escape clears any drag state
-    h.key_press(egui::Key::Escape);
-    assert_eq!(h.state().views[i].dynamic_zoom, None);
+    // 5. Shift-click zooms out by 1.5x
+    click_modifiers_at(&mut h, center, egui::Modifiers::SHIFT);
+    let after_shift_click = h.state().views[i].zoom;
+    assert!((after_shift_click - before_click).abs() < 0.05, "shift-click zooms back out: {after_click} -> {after_shift_click}");
 
-    // 6. Turkish translation check
+    // 6. Escape clears an active drag
+    h.hover_at(center);
+    h.run_steps(1);
+    h.drag_at(center);
+    h.run_steps(1);
+    h.hover_at(center - egui::vec2(0.0, 20.0));
+    h.run_steps(1);
+    assert!(h.state().views[i].dynamic_zoom.is_some());
+    h.key_press(egui::Key::Escape);
+    h.run_steps(2);
+    assert_eq!(h.state().views[i].dynamic_zoom, None);
+    h.drop_at(center - egui::vec2(0.0, 20.0));
+    h.run_steps(1);
+
+    // 7. Turkish translation check
     let tr = pdfcraft_ui_egui::i18n::Lang::from_code("tr").unwrap();
     assert_eq!(pdfcraft_ui_egui::i18n::tr(tr, "Dynamic zoom"), "Dinamik yakınlaştırma");
 }

@@ -77,7 +77,13 @@ pub(crate) fn dynamic_zoom_input(ui: &egui::Ui, resp: &egui::Response, xf: &Page
     if resp.clicked()
         && let Some(p) = pointer.filter(|p| xf.rect.contains(*p))
     {
-        let shift = ui.input(|i| i.modifiers.shift);
+        // Shift as held now, or as the click's own event carried it (synthetic click).
+        let shift = ui.input(|i| {
+            i.modifiers.shift
+                || i.events.iter().any(|e| {
+                    matches!(e, egui::Event::PointerButton { button: egui::PointerButton::Primary, pressed: false, modifiers, .. } if modifiers.shift)
+                })
+        });
         let factor = if shift { 1.0 / 1.5 } else { 1.5 };
         let new_zoom = (view.zoom * factor).clamp(0.08, 64.0);
         view.zoom_at(new_zoom, p);
