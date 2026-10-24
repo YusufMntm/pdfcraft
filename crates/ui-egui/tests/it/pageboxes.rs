@@ -12,6 +12,7 @@ const FIXTURE: &[u8] = b"%PDF-1.7
 trailer << /Root 1 0 R >>
 %%EOF";
 
+/// Harness setup with a 2-page fixture document.
 fn harness() -> Harness<'static, PdfCraftApp> {
     let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
         let mut app = PdfCraftApp::new();
@@ -25,12 +26,14 @@ fn harness() -> Harness<'static, PdfCraftApp> {
     h
 }
 
+/// Retrieve the (width, height) of page `page` of the active document.
 fn size(h: &Harness<'static, PdfCraftApp>, page: usize) -> (f32, f32) {
     let s = h.state();
     let p = &s.session.get(s.views[0].id).unwrap().info.pages[page];
     (p.width, p.height)
 }
 
+/// Test that dragging the crop tool crops the page rectangle and returns to the select tool.
 #[test]
 fn the_crop_tool_crops_to_the_dragged_rectangle_then_returns_to_select() {
     let mut h = harness();
@@ -57,6 +60,7 @@ fn the_crop_tool_crops_to_the_dragged_rectangle_then_returns_to_select() {
     assert_eq!(h.state().session.get(h.state().views[0].id).unwrap().can_undo(), Some("Crop page"));
 }
 
+/// Test that the Set Page Boxes dialog applies margins to chosen pages and resets with Set to zero.
 #[test]
 fn set_page_boxes_dialog_applies_margins_to_the_chosen_pages() {
     let mut h = harness();
@@ -82,6 +86,7 @@ fn set_page_boxes_dialog_applies_margins_to_the_chosen_pages() {
     assert_eq!(size(&h, 0), (300.0, 400.0));
 }
 
+/// Test that duplicating pages copies the current page and increases page count.
 #[test]
 fn duplicate_pages_copies_the_current_page() {
     let mut h = harness();

@@ -189,6 +189,7 @@ mod tests {
     use super::*;
     use crate::Session;
 
+    /// Verifies detection of non-white content and margin computation on a text-bearing document.
     #[test]
     fn white_margins_detection_and_margins_on_text_page() {
         let s = Session::new();
@@ -220,6 +221,7 @@ mod tests {
         assert!(new_crop[2] - new_crop[0] < 612.0, "crop width should be smaller than 612: {:?}", new_crop);
     }
 
+    /// Verifies that an empty blank page yields no content box or margins, and removal is safe.
     #[test]
     fn white_margins_empty_page_returns_none() {
         let s = Session::new();
@@ -239,6 +241,7 @@ mod tests {
         assert_eq!(s.get(id).unwrap().info.pages[0].crop, [0.0, 0.0, 612.0, 792.0]);
     }
 
+    /// Verifies content detection and margin removal on a page rotated by 90 degrees.
     #[test]
     fn white_margins_rotated_page_content_detection() {
         use crate::Edit;

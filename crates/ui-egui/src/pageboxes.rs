@@ -46,6 +46,7 @@ impl BoxesDraft {
         }
     }
 
+    /// Build the [`Edit`] specification reflecting current dialog settings.
     pub fn edit(&self, current: usize, count: usize) -> Edit {
         let spec =
             if self.margins.iter().all(|m| *m == 0.0) && self.which != PageBox::Media { BoxSpec::Remove } else { BoxSpec::Margins(self.margins) };
@@ -53,6 +54,7 @@ impl BoxesDraft {
     }
 }
 
+/// Map a [`PageBox`] variant to its index in the page's box array.
 fn box_index(b: PageBox) -> usize {
     match b {
         PageBox::Media => 0,
@@ -210,6 +212,7 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens) -> (boo
 mod tests {
     use super::*;
 
+    /// Test that page selection drafts pick correct pages and reset margins.
     #[test]
     fn drafts_pick_pages_and_reset_to_default_at_zero() {
         let mut d = BoxesDraft::default();

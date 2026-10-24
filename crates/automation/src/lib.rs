@@ -1569,6 +1569,7 @@ impl Automation {
         self.apply(a, Edit::SetTransition { pages, spec: TransitionSpec { transition, display } })
     }
 
+    /// Sets a page box (`Crop`, `Trim`, `Bleed`, `Art`, `Media`) by margins or rect, or resets it.
     fn page_set_box(&mut self, a: &Args) -> Result<Value> {
         use pdfcraft_engine::{BoxSpec, PageBox};
         let doc = self.doc(a)?;
@@ -1624,6 +1625,7 @@ impl Automation {
         Ok(out)
     }
 
+    /// Protects a document with open and/or permissions passwords and permissions restrictions.
     fn doc_protect(&mut self, a: &Args) -> Result<Value> {
         use pdfcraft_engine::{Algorithm, Changes, Printing, Protection};
         let d = Protection::default();

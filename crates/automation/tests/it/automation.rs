@@ -2410,6 +2410,7 @@ fn page_duplicate_at_inserts_the_copies_there() {
     assert!(matches!(a.call("page_duplicate", &json!({ "doc": doc, "pages": [1], "at": 6 })), Err(ToolError::InvalidArgs(_))), "past the end");
 }
 
+/// Test duplicating and cropping pages via the `page_duplicate` and `page_set_box` automation tools.
 #[test]
 fn duplicating_and_cropping_through_tools() {
     let dir = workdir("boxes");
@@ -2456,6 +2457,7 @@ fn remove_white_margins_through_tools() {
     assert_eq!(undone["pages"][0]["height"].as_f64().unwrap(), 300.0);
 }
 
+/// Test setting and removing headers, footers, watermarks and backgrounds headlessly through automation tools.
 #[test]
 fn headers_watermarks_and_backgrounds_through_tools() {
     let dir = workdir("marks");
