@@ -3,7 +3,7 @@
 //! Renders an interactive, movable window showing real-time pointer coordinates on the active PDF
 //! page (in user space or view space), along with the page's visible dimensions and measurement unit cycling.
 
-use egui::{Grid, RichText, Window, pos2, vec2};
+use egui::{Grid, Order, RichText, Window, pos2, vec2};
 
 use crate::PdfCraftApp;
 use crate::theme::Tokens;
@@ -65,7 +65,10 @@ pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
 
                 if let Some((view, doc)) = active {
                     let page_hit = pointer.and_then(|pos| {
-                        if !view.viewport_rect().contains(pos) || ctx.layer_id_at(pos) == Some(ui.layer_id()) {
+                        if !view.viewport_rect().contains(pos)
+                            || app.dialog.is_some()
+                            || ctx.layer_id_at(pos).is_some_and(|l| l == ui.layer_id() || l.order > Order::Middle)
+                        {
                             return None;
                         }
                         view.screen_xforms().iter().find(|(_, xf)| xf.rect.contains(pos)).map(|(p, xf)| (*p, *xf, pos))
