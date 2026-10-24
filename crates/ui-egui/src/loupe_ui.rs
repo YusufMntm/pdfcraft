@@ -295,7 +295,7 @@ pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
             let (rect, resp) = ui.allocate_exact_size(loupe.viewport_size, egui::Sense::drag());
             ui.painter().rect_filled(rect, CornerRadius::same(4), paper);
             if let Some(tex) = &loupe.texture {
-                let shown = vec2(actual_ap_w, actual_ap_h) * (scale / ppp);
+                let shown = vec2(actual_ap_w, actual_ap_h) * (loupe.zoom * view.zoom * PT);
                 let img_rect = Rect::from_center_size(rect.center(), shown);
                 ui.painter().image(tex.id(), img_rect, Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)), Color32::WHITE);
             }
