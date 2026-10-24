@@ -1150,6 +1150,7 @@ fn multiselect_choice_indices_are_sorted_without_reordering_values() {
     }
 }
 
+/// A list box whose options share an export value resolves and highlights only the row specified by `/I`.
 #[test]
 fn list_box_options_sharing_export_value_respects_i() {
     // Repro 1 from #4531:
@@ -1196,6 +1197,7 @@ fn list_box_options_sharing_export_value_respects_i() {
     assert_eq!(app_stream.matches("0.6 0.75 0.86 rg").count(), 1);
 }
 
+/// A single-select list box given an array `/V` leniently retains and highlights only the first row.
 #[test]
 fn single_select_list_box_with_array_v_is_lenient_and_highlights_first_only() {
     // Repro 2 from #4531:
@@ -1232,6 +1234,7 @@ fn single_select_list_box_with_array_v_is_lenient_and_highlights_first_only() {
     assert!(matches!(raw_v, pdfcraft_cos::Object::String(_)), "/V was written as a string, not an array");
 }
 
+/// When `/I` identifies export values that differ from `/V`, `/V` takes precedence per ISO 32000-2 Table 234.
 #[test]
 fn choice_field_v_takes_precedence_when_i_differs() {
     // ISO 32000-2 Table 234: If the items identified by /I differ from those in /V, /V shall be used.
@@ -1253,6 +1256,7 @@ fn choice_field_v_takes_precedence_when_i_differs() {
     assert_eq!(app_stream.matches("0.6 0.75 0.86 rg").count(), 1, "Two alone is highlighted");
 }
 
+/// Choice indices validation rejects out-of-bounds indices and multiple indices on single-select fields.
 #[test]
 fn choice_indices_validation_and_errors() {
     let mut doc = fixture();

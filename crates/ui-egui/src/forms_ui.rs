@@ -521,6 +521,7 @@ pub fn field_text_size(painter: &egui::Painter, f: &FormField, w: &FormWidget, t
     size.min(300.0) as f32
 }
 
+/// Paint an unbaked interactive form widget preview directly on the canvas painter.
 fn paint_unbaked_widget(painter: &egui::Painter, xf: &PageXform, f: &FormField, w: &FormWidget, r: Rect) {
     match f.kind {
         FormFieldKind::Text | FormFieldKind::Combo => {
