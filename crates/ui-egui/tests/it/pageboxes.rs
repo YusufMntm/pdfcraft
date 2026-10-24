@@ -175,4 +175,3 @@ fn the_crop_tool_leaves_the_page_grid_so_a_page_can_be_cropped() {
     assert!((w - 150.0).abs() < 2.0 && (hh - 200.0).abs() < 2.0, "{w}×{hh}");
     assert_eq!(size(&h, 1), (300.0, 400.0));
 }
-}

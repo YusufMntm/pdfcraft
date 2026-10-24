@@ -14,7 +14,7 @@ use crate::{Document, EditError};
 /// Returns `Ok(Some([x0, y0, x1, y1]))` in user space if content was found, or `Ok(None)` if
 /// the page is entirely white or empty.
 pub fn detect_page_content_box(doc: &Document, page: usize) -> Result<Option<[f64; 4]>, EditError> {
-    let config = RenderConfig { password: doc.password.as_deref().map(Arc::from), ..Default::default() };
+    let config = RenderConfig { password: doc.password.as_deref().map(Arc::from), layers: doc.config.layers.clone(), ..Default::default() };
     let mut renderer = PageRenderer::new(doc.display.clone(), config);
     let all_boxes = doc.page_boxes();
     detect_page_content_box_impl(doc, page, &mut renderer, &all_boxes)
@@ -25,7 +25,7 @@ pub type PageContentBox = (usize, Option<[f64; 4]>);
 
 /// Batch content box detection reusing a single [`PageRenderer`] and `page_boxes` snapshot across multiple pages.
 pub fn detect_pages_content_boxes(doc: &Document, pages: &[usize]) -> Result<Vec<PageContentBox>, EditError> {
-    let config = RenderConfig { password: doc.password.as_deref().map(Arc::from), ..Default::default() };
+    let config = RenderConfig { password: doc.password.as_deref().map(Arc::from), layers: doc.config.layers.clone(), ..Default::default() };
     let mut renderer = PageRenderer::new(doc.display.clone(), config);
     let all_boxes = doc.page_boxes();
     let mut results = Vec::with_capacity(pages.len());
@@ -135,8 +135,8 @@ fn detect_page_content_box_impl(
         return Ok(None);
     }
 
-    // Clamp within the page's MediaBox.
-    let media = all_boxes.get(page).map(|boxes| boxes[0]).unwrap_or([0.0, 0.0, info.width as f64, info.height as f64]);
+    // Clamp within the page's MediaBox (or crop box when page boxes are unavailable).
+    let media = all_boxes.get(page).map(|boxes| boxes[0]).unwrap_or_else(|| info.crop.map(|v| v as f64));
     let min_media_x = media[0].min(media[2]);
     let max_media_x = media[0].max(media[2]);
     let min_media_y = media[1].min(media[3]);
@@ -168,7 +168,7 @@ pub fn page_content_margins(doc: &Document, page: usize) -> Result<Option<[f64; 
         return Ok(None);
     };
 
-    let media = doc.page_boxes().get(page).map(|boxes| boxes[0]).unwrap_or([0.0, 0.0, info.width as f64, info.height as f64]);
+    let media = doc.page_boxes().get(page).map(|boxes| boxes[0]).unwrap_or_else(|| info.crop.map(|v| v as f64));
     let min_media_x = media[0].min(media[2]);
     let max_media_x = media[0].max(media[2]);
     let min_media_y = media[1].min(media[3]);
