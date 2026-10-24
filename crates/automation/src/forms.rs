@@ -147,6 +147,7 @@ fn format_json(f: &Format) -> Value {
     }
 }
 
+/// Return the lowercase string representation of a form field kind.
 fn kind_name(k: FormFieldKind) -> &'static str {
     match k {
         FormFieldKind::Text => "text",

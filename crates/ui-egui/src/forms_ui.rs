@@ -108,6 +108,7 @@ pub(crate) fn draft_text(f: &FormField) -> String {
     value
 }
 
+/// Create an initial focus state for a form widget.
 fn open_focus(f: &FormField, widget: usize) -> Focus {
     Focus {
         name: f.name.clone(),

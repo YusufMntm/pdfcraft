@@ -465,6 +465,7 @@ fn actions_of(doc: &Document, d: &Dict, widgets: &[ObjRef], scripts: &mut Decode
     out
 }
 
+/// Parse text or export values from a `/V` or `/DV` object.
 fn values_of(doc: &Document, o: Option<&Object>) -> Vec<String> {
     let Some(o) = o else { return Vec::new() };
     match &*doc.resolve(o) {
@@ -534,6 +535,7 @@ pub(crate) fn resolve_choice_indices(options: &[(String, String)], v: &[String],
     indices
 }
 
+/// Parse an array of floating-point numbers from an object.
 fn nums(doc: &Document, o: Option<&Object>) -> Option<Vec<f64>> {
     let o = doc.resolve(o?);
     o.as_array()?.iter().map(|x| doc.resolve(x).as_f64()).collect()
@@ -557,6 +559,7 @@ struct PageWalk<'a> {
 }
 
 impl<'a> PageWalk<'a> {
+    /// Create a new page walk starting at `top`.
     fn new(doc: &'a Document, top: ObjRef) -> Self {
         let top = std::sync::Arc::new(Object::Array(vec![Object::Ref(top)]));
         Self { doc, seen: Default::default(), pending: vec![(top, 0)] }
@@ -1121,6 +1124,7 @@ pub fn calculations_changed(before: &[Field], after: &[Field]) -> Vec<String> {
         .collect()
 }
 
+/// Return a `FormError::Invalid` error.
 fn invalid<T>(m: impl Into<String>) -> Result<T, FormError> {
     Err(FormError::Invalid(m.into()))
 }
