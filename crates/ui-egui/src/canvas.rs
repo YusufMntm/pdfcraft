@@ -4411,6 +4411,12 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     if app.mode != crate::Mode::Read && !app.full_screen {
         quick_bar(app, avail, ui);
     }
+    if app.show_rulers && !app.full_screen {
+        let next_unit = app.views.get(index).and_then(|v| crate::rulers::draw_rulers(ui, v, avail, app.units, &t));
+        if let Some(u) = next_unit {
+            app.units = u;
+        }
+    }
     if let Some((source, file, destination)) = remote_open {
         app.open_remote_link(source, file, destination);
     }
