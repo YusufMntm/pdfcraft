@@ -438,6 +438,7 @@ impl Automation {
                 self.apply(&a, Edit::DuplicatePages { pages, at })?
             }
             "page_set_box" => self.page_set_box(&a)?,
+            "page_remove_white_margins" => self.page_remove_white_margins(&a)?,
             "page_transition_set" => self.page_transition_set(&a)?,
             "doc_create" => self.doc_create(&a)?,
             "xfa_to_static" => self.apply(&a, Edit::XfaToStatic)?,
@@ -1604,6 +1605,22 @@ impl Automation {
         };
         let mut out = self.apply(a, Edit::SetPageBox { pages, which, spec })?;
         out["page_sizes"] = json!(self.doc(a)?.info.pages.iter().map(|p| [p.width, p.height]).collect::<Vec<_>>());
+        Ok(out)
+    }
+
+    /// Automatically crop pages to their visible non-white content bounding box, removing excess margins.
+    fn page_remove_white_margins(&mut self, a: &Args) -> Result<Value> {
+        let doc = self.doc(a)?;
+        let n = doc.info.pages.len();
+        let pages = match a.opt_ints("pages")? {
+            Some(_) => self.pages(a, "pages")?,
+            None => (0..n).collect(),
+        };
+        let id = doc.id;
+        self.session.remove_white_margins(id, &pages).map_err(failed)?;
+        let doc = self.doc(a)?;
+        let mut out = summary(doc);
+        out["page_sizes"] = json!(doc.info.pages.iter().map(|p| [p.width, p.height]).collect::<Vec<_>>());
         Ok(out)
     }
 

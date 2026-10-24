@@ -129,9 +129,16 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens) -> (boo
                     ui.end_row();
                 }
                 ui.label("");
-                if ui.button(tl!("Set to zero")).clicked() {
-                    d.margins = [0.0; 4];
-                }
+                ui.horizontal(|ui| {
+                    if ui.button(tl!("Set to zero")).clicked() {
+                        d.margins = [0.0; 4];
+                    }
+                    if ui.button(tl!("Remove white margins")).clicked()
+                        && let Ok(Some(margins)) = app.session.content_margins(id, current)
+                    {
+                        d.margins = margins;
+                    }
+                });
                 ui.end_row();
                 ui.label(tl!("Pages"));
                 ui.vertical(|ui| {
