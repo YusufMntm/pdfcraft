@@ -701,6 +701,7 @@ pub(crate) fn select_all(view: &mut DocView, form: &[FormField]) {
     view.prepare.also = selected.collect();
 }
 
+/// Cancel an active marquee selection and restore the previous field selection.
 fn cancel_marquee(prep: &mut PrepareView) {
     prep.grab = None;
     prep.ignore_release = true;

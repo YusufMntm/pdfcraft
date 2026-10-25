@@ -662,6 +662,7 @@ impl Automation {
         Ok(out)
     }
 
+    /// The tab sequence of fields across pages in the document.
     fn tab_sequence(&self, a: &Args) -> Result<Value> {
         let doc = self.doc(a)?;
         let mut seq: Vec<(usize, &str)> =
@@ -693,6 +694,7 @@ impl Automation {
         }
     }
 
+    /// Export form data and/or comments to a file.
     pub(crate) fn doc_export_data(&mut self, a: &Args) -> Result<Value> {
         let id = self.doc(a)?.id;
         let path = self.resolve(a.str("path")?, true)?;

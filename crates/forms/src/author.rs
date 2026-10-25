@@ -1664,10 +1664,12 @@ fn delete_found_widget(doc: &mut Document, f: Field, widget_index: usize) -> Res
     let target_on = target_widget.on_state.as_deref();
     let target_export = f.export_of(widget_index);
     let target_matches = |val: &str| -> bool { Some(val) == target_on || Some(val) == target_export };
+    // Another widget with the same on-state keeps the stored value valid.
+    let shared = target_on.is_some() && f.widgets.iter().enumerate().any(|(i, w)| i != widget_index && w.on_state.as_deref() == target_on);
 
     if matches!(f.kind, FieldKind::Radio | FieldKind::CheckBox) {
         let cur_v = doc.get(f.obj).as_dict().and_then(|d| d.get(b"V")).and_then(|o| crate::text_of(&doc.resolve(o)));
-        let is_selected = cur_v.as_deref().is_some_and(target_matches) || f.value.iter().any(|v| target_matches(v.as_str()));
+        let is_selected = !shared && (cur_v.as_deref().is_some_and(target_matches) || f.value.iter().any(|v| target_matches(v.as_str())));
 
         if is_selected {
             doc.update_dict(f.obj, |d| d.set(b"V".to_vec(), Object::name("Off")))?;
@@ -1679,7 +1681,7 @@ fn delete_found_widget(doc: &mut Document, f: Field, widget_index: usize) -> Res
         }
 
         let cur_dv = doc.get(f.obj).as_dict().and_then(|d| d.get(b"DV")).and_then(|o| crate::text_of(&doc.resolve(o)));
-        if cur_dv.as_deref().is_some_and(target_matches) {
+        if !shared && cur_dv.as_deref().is_some_and(target_matches) {
             doc.update_dict(f.obj, |d| d.set(b"DV".to_vec(), Object::name("Off")))?;
         }
     }
@@ -1693,6 +1695,7 @@ fn delete_found_widget(doc: &mut Document, f: Field, widget_index: usize) -> Res
     Ok(())
 }
 
+/// Detach an entire field and all of its widgets from the document and AcroForm.
 fn delete_found_field(doc: &mut Document, f: Field) -> Result<(), FormError> {
     let widgets: std::collections::HashSet<ObjRef> = f.widgets.iter().map(|w| w.obj).collect();
     for p in page_refs(doc) {

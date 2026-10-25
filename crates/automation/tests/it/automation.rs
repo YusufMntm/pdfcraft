@@ -3991,6 +3991,7 @@ fn preparing_a_form_through_tools() {
     assert!(matches!(a.call("form_set_image", &json!({ "doc": doc, "field": "size", "path": "pics/a_page_1.png" })), Err(ToolError::Failed(_))));
 }
 
+/// Rotating a form field through automation tools.
 #[test]
 fn rotating_a_field_through_tools() {
     let dir = workdir("rotate-field");

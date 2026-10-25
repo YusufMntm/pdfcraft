@@ -2516,6 +2516,7 @@ fn multiselect_choice_indices_stay_sorted_through_engine_save_and_reopen() {
     assert_eq!(s.get(reopened).unwrap().form[0].value, chosen, "reopening keeps selection order");
 }
 
+/// Preparing a form adds, renames, and deletes fields with full undo support.
 #[test]
 fn preparing_a_form_adds_renames_and_deletes_fields() {
     let (mut s, id) = session_with(1);

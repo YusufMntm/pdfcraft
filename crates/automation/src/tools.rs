@@ -86,23 +86,28 @@ struct T {
     command: Option<&'static str>,
 }
 
+/// Construct a tool definition builder.
 const fn t(name: &'static str, title: &'static str, description: &'static str) -> T {
     T { name, title, description, read_only: false, destructive: false, command: None }
 }
 
 impl T {
+    /// Mark tool as read-only.
     const fn ro(mut self) -> Self {
         self.read_only = true;
         self
     }
+    /// Mark tool as destructive.
     const fn destructive(mut self) -> Self {
         self.destructive = true;
         self
     }
+    /// Set command id for the tool.
     const fn cmd(mut self, id: &'static str) -> Self {
         self.command = Some(id);
         self
     }
+    /// Build ToolDef with given JSON schema.
     fn with(self, input_schema: Value) -> ToolDef {
         ToolDef {
             name: self.name,

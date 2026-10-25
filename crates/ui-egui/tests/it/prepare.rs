@@ -577,6 +577,7 @@ fn aligning_distributing_and_sizing_several_fields() {
     assert!(arrange(&form(&h), &a, &[("b".into(), 0)], Arrange::DistributeV).is_none(), "distributing needs three");
 }
 
+/// Deleting several selected fields and detecting form fields from the panel (#93, #95).
 #[test]
 fn deleting_several_selected_fields_and_detecting_fields_from_the_panel() {
     let mut h = harness();
@@ -707,6 +708,7 @@ fn deleting_selected_radio_button_alongside_other_fields() {
     assert_eq!(doc.can_undo(), Some("Delete 2 fields"));
 }
 
+/// In Prepare Form mode, previewing allows filling the form and locked fields cannot be edited.
 #[test]
 fn preview_fills_the_form_and_locked_fields_keep_their_properties() {
     let mut h = harness();

@@ -1282,6 +1282,7 @@ fn every_field_type_can_be_added_named_and_drawn() {
     assert!(add_field(&mut doc, 0, [0.0, 0.0, 2.0, 2.0], &NewField::CheckBox, None).is_err(), "too small");
 }
 
+/// Renaming, setting properties, and deleting fields in a form.
 #[test]
 fn properties_rename_and_delete() {
     let mut doc = fixture();
@@ -1388,6 +1389,53 @@ fn deleting_individual_radio_buttons_from_group() {
     // 6. Error handling checks.
     assert!(matches!(delete_widget(&mut doc, "Group1", 0), Err(FormError::NoSuchField(_))));
     assert!(matches!(delete_widget(&mut doc, "nonexistent", 0), Err(FormError::NoSuchField(_))));
+}
+
+/// Deleting a widget from a duplicated checked check box preserves /V and the remaining
+/// widget's appearance state (/AS) because another widget shares the on-state (#4609).
+#[test]
+fn deleting_widget_from_duplicated_checked_checkbox_preserves_value() {
+    let mut doc = one_page();
+    let pages = doc.get(doc.root().unwrap()).as_dict().unwrap().reference(b"Pages").unwrap();
+    for _ in 0..2 {
+        let mut p = pdfcraft_cos::Dict::new();
+        p.set(b"Type".to_vec(), Object::name("Page"));
+        p.set(b"Parent".to_vec(), Object::Ref(pages));
+        p.set(b"MediaBox".to_vec(), Object::Array(vec![0.into(), 0.into(), 600.into(), 800.into()]));
+        let r = doc.add(p);
+        doc.update_dict(pages, |d| {
+            let mut kids = d.get(b"Kids").unwrap().as_array().unwrap().clone();
+            kids.push(Object::Ref(r));
+            d.set(b"Count".to_vec(), Object::Int(kids.len() as i64));
+            d.set(b"Kids".to_vec(), Object::Array(kids));
+        })
+        .unwrap();
+    }
+
+    let name = add_field(&mut doc, 0, [50.0, 750.0, 70.0, 770.0], &NewField::CheckBox, Some("Agree")).unwrap();
+    assert_eq!(duplicate_field(&mut doc, &name, &[0, 1]).unwrap(), 1);
+
+    // Check the box so /V is "Yes".
+    set_value(&mut doc, &name, &FieldValue::Check(true)).unwrap();
+    let all = fields(&doc);
+    let f = field(&all, &name);
+    assert_eq!(f.widgets.len(), 2);
+    assert_eq!(f.value, ["Yes"]);
+
+    // Delete widget 0 (page 0): widget 1 (page 1) shares the on-state, so /V and /AS stay "Yes".
+    delete_widget(&mut doc, &name, 0).unwrap();
+
+    let all = fields(&doc);
+    let f = field(&all, &name);
+    assert_eq!(f.widgets.len(), 1, "only 1 widget remains");
+    assert_eq!(f.value, ["Yes"], "value stays Yes because remaining widget has the same on-state");
+    let obj = doc.get(f.widgets[0].obj);
+    let remaining_as = obj.as_dict().and_then(|d| d.get(b"AS")).and_then(|o| o.as_name());
+    assert_eq!(remaining_as, Some(b"Yes".as_slice()), "remaining widget AS stays Yes");
+
+    // Deleting the remaining widget deletes the field entirely.
+    delete_widget(&mut doc, &name, 0).unwrap();
+    assert!(!fields(&doc).iter().any(|field| field.name == name));
 }
 
 /// A parent `MASTER` with kids `a` and `b` (each a field merged with its widget) and `e` (a field
