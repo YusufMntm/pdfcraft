@@ -45,6 +45,7 @@ fn fixture() -> Vec<u8> {
     out
 }
 
+/// Build a synthetic fixture with a GoToR link to `file` with `destination`.
 fn remote_fixture(file: &str, destination: &str) -> Vec<u8> {
     // canonicalize() uses a Windows device prefix; a PDF file specification uses the ordinary drive path.
     #[cfg(windows)]
@@ -71,6 +72,7 @@ fn remote_fixture(file: &str, destination: &str) -> Vec<u8> {
     out
 }
 
+/// Build a test harness configured with a remote GoToR fixture.
 fn remote_harness(source_path: Option<String>, file: &str, destination: &str) -> Harness<'static, PdfCraftApp> {
     let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
         let mut app = PdfCraftApp::new();
@@ -133,6 +135,7 @@ fn gotoe_harness() -> Harness<'static, PdfCraftApp> {
     h
 }
 
+/// Create a multi-page PDF document with optional password protection.
 fn linked_pages(count: usize, password: Option<&str>) -> Vec<u8> {
     use pdfcraft_engine::{Edit, Protection, Session};
     let mut session = Session::new();
@@ -146,6 +149,7 @@ fn linked_pages(count: usize, password: Option<&str>) -> Vec<u8> {
     session.save_bytes(id).unwrap().as_ref().clone()
 }
 
+/// Build default link test harness.
 fn harness() -> Harness<'static, PdfCraftApp> {
     let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
         let mut app = PdfCraftApp::new();
@@ -160,6 +164,7 @@ fn harness() -> Harness<'static, PdfCraftApp> {
     h
 }
 
+/// Simulate pointer click at given coordinates.
 fn click_at(h: &mut Harness<'static, PdfCraftApp>, at: egui::Pos2) {
     h.hover_at(at);
     h.run_steps(2);
@@ -175,14 +180,17 @@ fn click_link_at(h: &mut Harness<'static, PdfCraftApp>, y: f32) {
     click_at(h, at);
 }
 
+/// Click the remote link annotation.
 fn click_remote_link(h: &mut Harness<'static, PdfCraftApp>) {
     click_link(h);
 }
 
+/// Click link on page 1.
 fn click_link(h: &mut Harness<'static, PdfCraftApp>) {
     click_link_at(h, 325.0);
 }
 
+/// Click a form field by name.
 fn click_field(h: &mut Harness<'static, PdfCraftApp>, name: &str) {
     let at = {
         let s = h.state();

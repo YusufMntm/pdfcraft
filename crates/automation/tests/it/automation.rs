@@ -5244,6 +5244,7 @@ fn a_launch_link_to_a_pdf_opens_it_like_a_remote_link() {
     assert_eq!(a.session().docs().len(), before, "nothing was opened or launched");
 }
 
+/// Test that `link_open` refuses non-regular files and non-PDF targets.
 #[test]
 fn local_gotor_link_open_refuses_directories_devices_and_non_pdf_targets() {
     let (_base, root) = sandbox("gotor-not-a-file");
@@ -5272,6 +5273,7 @@ fn local_gotor_link_open_refuses_directories_devices_and_non_pdf_targets() {
     }
 }
 
+/// Test that local GoToR `link_open` applies destinations, honors root confinement, and respects passwords.
 #[test]
 fn local_gotor_link_open_applies_destinations_and_honors_root() {
     let (base, root) = sandbox("gotor-open");

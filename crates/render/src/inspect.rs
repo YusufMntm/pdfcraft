@@ -1719,6 +1719,7 @@ impl<'a> Inspector<'a> {
         (!file.is_empty()).then_some(file)
     }
 
+    /// Read the optional `/NewWindow` boolean hint from an action dictionary.
     fn new_window(&self, action: &Dictionary) -> Option<bool> {
         match action.get(b"NewWindow").map(|o| self.resolve(o)) {
             Ok(Object::Boolean(value)) => Some(*value),
@@ -1744,6 +1745,7 @@ impl<'a> Inspector<'a> {
         pdf.then_some(LinkTarget::RemoteGoTo { launch: true, file, destination: RemoteDestination::Default, new_window })
     }
 
+    /// Read an object as text, capping its length in bytes.
     fn pdf_text(&self, o: &Object, max_bytes: usize) -> Option<String> {
         match self.resolve(o) {
             Object::String(bytes, _) => limited_pdf_string(bytes, max_bytes),

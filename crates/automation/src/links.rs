@@ -11,11 +11,13 @@ use std::path::Path;
 use crate::comments::parse_color;
 use crate::{Args, Automation, Result, ToolError, failed};
 
+/// Construct an invalid-argument error for link tools.
 fn bad(m: impl Into<String>) -> ToolError {
     ToolError::InvalidArgs(m.into())
 }
 
 impl Automation {
+    /// Convert an input rectangle in view points to user coordinates.
     fn view_rect(&self, a: &Args, page: usize) -> Result<Option<[f64; 4]>> {
         let Some(v) = a.get("rect") else { return Ok(None) };
         let r: Vec<f64> = v.as_array().map(|x| x.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
@@ -25,6 +27,7 @@ impl Automation {
         Ok(Some([u0[0].min(u1[0]) as f64, u0[1].min(u1[1]) as f64, u0[0].max(u1[0]) as f64, u0[1].max(u1[1]) as f64]))
     }
 
+    /// Parse a link destination action from `url` or `to_page`.
     fn link_action(&self, a: &Args) -> Result<Option<LinkAction>> {
         match (a.opt_str("url")?, a.opt_int("to_page")?) {
             (Some(_), Some(_)) => Err(bad("pass url or to_page, not both")),
@@ -40,6 +43,7 @@ impl Automation {
         }
     }
 
+    /// Parse visual style options for a link annotation.
     fn link_style(&self, a: &Args, base: LinkStyle) -> Result<LinkStyle> {
         let mut s = base;
         if let Some(v) = a.opt_bool("visible")? {
@@ -63,6 +67,7 @@ impl Automation {
         Ok(s)
     }
 
+    /// List all link annotations in a document.
     pub(crate) fn link_list(&self, a: &Args) -> Result<Value> {
         let doc = self.doc(a)?;
         let targets: std::collections::HashMap<(usize, usize), &LinkTarget> = doc.info.links.iter().map(|t| ((t.page, t.index), &t.target)).collect();
@@ -195,6 +200,7 @@ impl Automation {
         }
     }
 
+    /// Add a new link annotation to a page.
     pub(crate) fn link_add(&mut self, a: &Args) -> Result<Value> {
         let page = self.page(a)?;
         let rect = self.view_rect(a, page)?.ok_or_else(|| bad("link_add needs rect"))?;
@@ -203,6 +209,7 @@ impl Automation {
         self.apply(a, Edit::AddLink { page, rect, action, style })
     }
 
+    /// Resolve a page and link index argument to the internal annotation index and current style.
     fn link_index(&self, a: &Args) -> Result<(usize, usize, LinkStyle)> {
         let page = self.page(a)?;
         let index = a.int("index")?;
@@ -215,6 +222,7 @@ impl Automation {
         Ok((page, l.index, l.style))
     }
 
+    /// Modify an existing link annotation's geometry, destination, or visual styling.
     pub(crate) fn link_edit(&mut self, a: &Args) -> Result<Value> {
         let (page, index, style) = self.link_index(a)?;
         let rect = self.view_rect(a, page)?;
@@ -223,11 +231,13 @@ impl Automation {
         self.apply(a, Edit::SetLink { page, index, rect, action, style: (new_style != style).then_some(new_style) })
     }
 
+    /// Delete a link annotation from a page.
     pub(crate) fn link_delete(&mut self, a: &Args) -> Result<Value> {
         let (page, index, _) = self.link_index(a)?;
         self.apply(a, Edit::DeleteLink { page, index })
     }
 
+    /// Detect web URLs in page text and convert them into link annotations.
     pub(crate) fn links_from_urls(&mut self, a: &Args) -> Result<Value> {
         let id = self.doc(a)?.id;
         let found = self.session.find_urls(id);
@@ -240,6 +250,7 @@ impl Automation {
         Ok(out)
     }
 
+    /// Remove link annotations from specified pages or the whole document.
     pub(crate) fn links_remove(&mut self, a: &Args) -> Result<Value> {
         let pages = match a.opt_ints("pages")? {
             Some(_) => Some(self.pages(a, "pages")?),
