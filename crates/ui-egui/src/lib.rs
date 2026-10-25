@@ -3162,8 +3162,10 @@ impl PdfCraftApp {
                     "snapshot" => QuickTool::Snapshot,
                     "column-select" => QuickTool::ColumnSelect,
                     "loupe" => {
-                        let page = self.active.and_then(|i| self.views.get(i)).map_or(0, |v| v.current);
-                        self.loupe = Some(loupe_ui::LoupeState::new(page));
+                        let active_view = self.active.and_then(|i| self.views.get(i));
+                        let doc_id = active_view.map(|v| v.id);
+                        let page = active_view.map_or(0, |v| v.current);
+                        self.loupe = Some(loupe_ui::LoupeState::new(doc_id, page));
                         QuickTool::Loupe
                     }
                     "certify" => QuickTool::SignArea { certify: true },
@@ -3862,8 +3864,10 @@ impl PdfCraftApp {
                 self.quick_tool = QuickTool::Select;
             }
         } else {
-            let page = self.active.and_then(|i| self.views.get(i)).map_or(0, |v| v.current);
-            self.loupe = Some(loupe_ui::LoupeState::new(page));
+            let active_view = self.active.and_then(|i| self.views.get(i));
+            let doc_id = active_view.map(|v| v.id);
+            let page = active_view.map_or(0, |v| v.current);
+            self.loupe = Some(loupe_ui::LoupeState::new(doc_id, page));
             self.quick_tool = QuickTool::Loupe;
         }
     }
@@ -3873,7 +3877,8 @@ impl PdfCraftApp {
         if let Some(loupe) = &mut self.loupe {
             loupe.set_center(page, center);
         } else {
-            let mut state = loupe_ui::LoupeState::new(page);
+            let doc_id = self.active.and_then(|i| self.views.get(i)).map(|v| v.id);
+            let mut state = loupe_ui::LoupeState::new(doc_id, page);
             state.set_center(page, center);
             self.loupe = Some(state);
         }

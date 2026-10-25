@@ -2324,4 +2324,40 @@ fn loupe_tool_toggles_and_magnifies_target() {
     assert!(h.state().loupe.is_none());
     assert_eq!(h.state().quick_tool, pdfcraft_ui_egui::QuickTool::Select);
 }
+
+#[test]
+fn loupe_tool_suppressed_in_full_screen_and_resets_on_document_switch() {
+    let mut h = harness();
+    h.state_mut().active = Some(0);
+    h.run_steps(3);
+
+    assert!(h.state_mut().execute("view.loupe"));
+    h.run_steps(2);
+    assert!(h.state().loupe.is_some());
+    assert_eq!(h.query_all_by_label("Loupe Tool").count(), 1);
+
+    // 1. Entering full screen suppresses the floating loupe window.
+    h.state_mut().full_screen = true;
+    h.run_steps(2);
+    assert_eq!(h.query_all_by_label("Loupe Tool").count(), 0, "loupe window suppressed in full screen");
+
+    h.state_mut().full_screen = false;
+    h.run_steps(2);
+    assert_eq!(h.query_all_by_label("Loupe Tool").count(), 1, "loupe window restored when leaving full screen");
+
+    // 2. Switching to another document resets loupe center and binds to new document.
+    let doc_a = h.state().views[0].id;
+    assert_eq!(h.state().loupe.as_ref().unwrap().doc_id, Some(doc_a));
+    h.state_mut().set_loupe_target(0, [0.2, 0.8]);
+    assert_eq!(h.state().loupe.as_ref().unwrap().center, [0.2, 0.8]);
+
+    // Open second document and switch to it.
+    h.state_mut().open_bytes("second.pdf", None, fixture(2)).unwrap();
+    let doc_b = h.state().views[1].id;
+    h.state_mut().active = Some(1);
+    h.run_steps(3);
+
+    let loupe = h.state().loupe.as_ref().expect("loupe stays open across document switch");
+    assert_eq!(loupe.doc_id, Some(doc_b), "loupe bound to new active document");
+    assert_eq!(loupe.center, [0.5, 0.5], "loupe center reset on document switch");
 }

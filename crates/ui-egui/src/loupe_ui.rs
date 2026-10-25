@@ -27,6 +27,8 @@ pub(crate) struct LoupeCacheKey {
 
 /// State for the Loupe magnifier tool window and canvas aperture.
 pub struct LoupeState {
+    /// Identifier of the document this loupe state is currently attached to.
+    pub doc_id: Option<DocId>,
     /// 0-based page index currently being magnified.
     pub page: usize,
     /// Normalized center on the page `[u, v]` in the range `[0.0..1.0, 0.0..1.0]`.
@@ -52,6 +54,7 @@ pub struct LoupeState {
 impl std::fmt::Debug for LoupeState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LoupeState")
+            .field("doc_id", &self.doc_id)
             .field("page", &self.page)
             .field("center", &self.center)
             .field("zoom", &self.zoom)
@@ -65,8 +68,9 @@ impl std::fmt::Debug for LoupeState {
 
 impl LoupeState {
     /// Creates a new Loupe tool state centered on page `page` with default 200% magnification.
-    pub fn new(page: usize) -> Self {
+    pub fn new(doc_id: Option<DocId>, page: usize) -> Self {
         Self {
+            doc_id,
             page,
             center: [0.5, 0.5],
             zoom: 2.0,
@@ -189,6 +193,19 @@ pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
         }
         return;
     };
+
+    if loupe.doc_id != Some(view.id) {
+        loupe.doc_id = Some(view.id);
+        loupe.page = view.current.min(doc.info.pages.len().saturating_sub(1));
+        loupe.center = [0.5, 0.5];
+        loupe.texture = None;
+        loupe.pool = None;
+        loupe.last_key = None;
+    } else if loupe.page >= doc.info.pages.len() {
+        loupe.page = view.current.min(doc.info.pages.len().saturating_sub(1));
+        loupe.texture = None;
+        loupe.last_key = None;
+    }
 
     let t = Tokens::get(ctx);
     let paper = app
