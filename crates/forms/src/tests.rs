@@ -1325,6 +1325,71 @@ fn properties_rename_and_delete() {
     assert_eq!(annots.as_array().unwrap().len(), 13 - 3, "the deleted widgets left the page");
 }
 
+/// Deleting individual radio buttons removes only that widget, leaving the rest of the group
+/// intact until the last remaining widget is deleted (#4609).
+#[test]
+fn deleting_individual_radio_buttons_from_group() {
+    let mut doc = one_page();
+    // 1. Create a radio group with three buttons: Small, Medium, Large.
+    add_field(&mut doc, 0, [50.0, 480.0, 64.0, 494.0], &NewField::Radio { group: None, export: "Small".into() }, None).unwrap();
+    add_field(&mut doc, 0, [80.0, 480.0, 94.0, 494.0], &NewField::Radio { group: Some("Group1".into()), export: "Medium".into() }, None).unwrap();
+    add_field(&mut doc, 0, [110.0, 480.0, 124.0, 494.0], &NewField::Radio { group: Some("Group1".into()), export: "Large".into() }, None).unwrap();
+
+    let all = fields(&doc);
+    let group = field(&all, "Group1");
+    assert_eq!(group.widgets.len(), 3);
+    assert_eq!(group.widgets.iter().filter_map(|w| w.on_state.clone()).collect::<Vec<_>>(), ["Small", "Medium", "Large"]);
+
+    let page_ref = page_refs(&doc)[0];
+    let page_annots = |d: &Document| {
+        let p = d.get(page_ref);
+        let a = p.as_dict().and_then(|dict| dict.get(b"Annots")).cloned().unwrap();
+        d.resolve(&a).as_array().cloned().unwrap()
+    };
+    assert_eq!(page_annots(&doc).len(), 3);
+
+    // Set value to "Medium" (widget index 1).
+    set_value(&mut doc, "Group1", &FieldValue::Radio(Some("Medium".into()))).unwrap();
+    assert_eq!(field(&fields(&doc), "Group1").value, ["Medium"]);
+
+    // 2. Delete widget 0 ("Small") - the unselected button.
+    delete_widget(&mut doc, "Group1", 0).unwrap();
+
+    let all = fields(&doc);
+    let group = field(&all, "Group1");
+    assert_eq!(group.widgets.len(), 2, "two buttons remain in group");
+    assert_eq!(group.widgets.iter().filter_map(|w| w.on_state.clone()).collect::<Vec<_>>(), ["Medium", "Large"]);
+    assert_eq!(page_annots(&doc).len(), 2, "deleted widget removed from page Annots");
+    // "Medium" is still selected.
+    assert_eq!(group.value, ["Medium"]);
+
+    // 3. Delete widget 0 ("Medium") - the currently selected button.
+    delete_widget(&mut doc, "Group1", 0).unwrap();
+
+    let all = fields(&doc);
+    let group = field(&all, "Group1");
+    assert_eq!(group.widgets.len(), 1, "one button remains in group");
+    assert_eq!(group.widgets.iter().filter_map(|w| w.on_state.clone()).collect::<Vec<_>>(), ["Large"]);
+    assert_eq!(page_annots(&doc).len(), 1);
+    // Because the selected button was deleted, field value is reset to empty/Off.
+    assert!(group.value.is_empty() || group.value == ["Off"]);
+
+    // 4. Setting value on the remaining button works.
+    set_value(&mut doc, "Group1", &FieldValue::Radio(Some("Large".into()))).unwrap();
+    assert_eq!(field(&fields(&doc), "Group1").value, ["Large"]);
+
+    // 5. Delete the last remaining button (widget 0).
+    delete_widget(&mut doc, "Group1", 0).unwrap();
+
+    let all = fields(&doc);
+    assert!(!all.iter().any(|f| f.name == "Group1"), "field is completely deleted");
+    assert_eq!(page_annots(&doc).len(), 0, "page Annots has no widgets left");
+
+    // 6. Error handling checks.
+    assert!(matches!(delete_widget(&mut doc, "Group1", 0), Err(FormError::NoSuchField(_))));
+    assert!(matches!(delete_widget(&mut doc, "nonexistent", 0), Err(FormError::NoSuchField(_))));
+}
+
 /// A parent `MASTER` with kids `a` and `b` (each a field merged with its widget) and `e` (a field
 /// with two widget kids), and the top-level fields `c` and `d`.
 fn dotted_form() -> Document {
