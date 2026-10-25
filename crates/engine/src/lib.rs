@@ -55,7 +55,9 @@ pub use pdfcraft_organize::Standard;
 pub use pdfcraft_organize::check_custom_key;
 pub use pdfcraft_organize::view::{InitialView, Layout as InitialLayout, Magnification, Navigation};
 
-pub use converter::{ConversionError, OFFICE_EXTENSIONS, OfficeApp, TempConvertedPdf, is_office_extension, is_office_name, is_office_path};
+pub use converter::{
+    ConversionError, OFFICE_EXTENSIONS, OfficeApp, TempConvertedPdf, is_office_extension, is_office_lock_file, is_office_name, is_office_path,
+};
 pub use pdfcraft_cos::Algorithm;
 pub use pdfcraft_create::{CONVERTIBLE, CreateError, ImageResolution, SourceKind, decode_text, source_kind};
 pub use pdfcraft_edit::added::{

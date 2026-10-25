@@ -176,6 +176,10 @@ fn prepare(job: Job) -> ResultKind {
         Input::Bytes(bytes) => bytes.clone(),
     };
     #[cfg(not(target_arch = "wasm32"))]
+    if pdfcraft_engine::is_office_lock_file(&job.name) {
+        return ResultKind::Failed(format!("{}: temporary Office lock files (~$*) cannot be opened", job.name));
+    }
+    #[cfg(not(target_arch = "wasm32"))]
     if pdfcraft_engine::is_office_name(&job.name) {
         let converted = pdfcraft_engine::converter::convert_bytes_to_pdf(&job.name, &bytes);
         match converted {

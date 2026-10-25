@@ -17,14 +17,20 @@ pub fn is_office_extension(ext: &str) -> bool {
     OFFICE_EXTENSIONS.iter().any(|&e| ext.eq_ignore_ascii_case(e))
 }
 
-/// Whether a file name has a supported Office extension.
-pub fn is_office_name(name: &str) -> bool {
-    name.rsplit_once('.').is_some_and(|(_, ext)| is_office_extension(ext))
+/// Whether a file name indicates a temporary Microsoft Office lock file (starts with `~$`).
+pub fn is_office_lock_file(name: &str) -> bool {
+    let file_name = Path::new(name).file_name().and_then(|n| n.to_str()).unwrap_or(name);
+    file_name.starts_with("~$")
 }
 
-/// Whether a path has a supported Office extension.
+/// Whether a file name has a supported Office extension and is not a lock file.
+pub fn is_office_name(name: &str) -> bool {
+    !is_office_lock_file(name) && name.rsplit_once('.').is_some_and(|(_, ext)| is_office_extension(ext))
+}
+
+/// Whether a path has a supported Office extension and is not a lock file.
 pub fn is_office_path(path: &Path) -> bool {
-    path.extension().and_then(|e| e.to_str()).is_some_and(is_office_extension)
+    path.file_name().and_then(|n| n.to_str()).is_some_and(is_office_name)
 }
 
 /// Classification of an Office document to the appropriate application.
@@ -573,6 +579,15 @@ mod tests {
         assert!(is_office_path(Path::new("C:/docs/file.docx")));
         assert!(is_office_path(Path::new("/home/user/sheet.xlsx")));
         assert!(!is_office_path(Path::new("/home/user/document.pdf")));
+    }
+
+    #[test]
+    fn rejects_office_lock_files() {
+        assert!(is_office_lock_file("~$report.docx"));
+        assert!(is_office_lock_file("C:/docs/~$budget.xlsx"));
+        assert!(!is_office_lock_file("report.docx"));
+        assert!(!is_office_name("~$report.docx"));
+        assert!(!is_office_path(Path::new("C:/docs/~$budget.xlsx")));
     }
 
     #[test]
