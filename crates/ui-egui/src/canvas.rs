@@ -3164,7 +3164,6 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     let mut hover_text: Option<(Pos2, String)> = None;
     let mut badge_hover: Option<(Pos2, String)> = None;
     let mut clicked_link: Option<LinkTarget> = None;
-    let mut remote_open: Option<(pdfcraft_engine::DocId, String, pdfcraft_render::RemoteDestination)> = None;
     let mut canvas_action: Option<comments::CanvasAction> = None;
     let mut field_menu: Option<FieldMenu> = None;
     let mut open_props: Option<(usize, usize)> = None;
@@ -3894,15 +3893,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                     let sr = xf.user_rect(info, i, l.rect);
                     if sr.contains(p) {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                        let label = match &l.target {
-                            LinkTarget::Page(n, _) => {
-                                crate::i18n::fmt(tl!("Go to page {p}"), &[("p", info.pages.get(*n).map(|p| p.label.as_str()).unwrap_or("?"))])
-                            }
-                            LinkTarget::Uri(u) => u.clone(),
-                            LinkTarget::SetLayers { .. } => tl!("Set layer visibility").to_string(),
-                            LinkTarget::RemoteGoTo { file, .. } => file.clone(),
-                            LinkTarget::Other(s) => crate::i18n::fmt(tl!("{s} action"), &[("s", s)]),
-                        };
+                        let label = link_target_label(&l.target, info);
                         hover_text = Some((p, label));
                         if resp.clicked() && tool == QuickTool::Select && !consumed {
                             clicked_link = Some(l.target.clone());
@@ -4391,14 +4382,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
             ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64((due - now).max(0.0)));
         }
     }
-    match clicked_link {
-        Some(LinkTarget::Page(p, dest)) => view.go_to_dest(p, dest, info),
-        Some(LinkTarget::Uri(u)) => app.request_document_url(&u, crate::LinkOrigin::Link),
-        Some(LinkTarget::SetLayers { changes, preserve_rb }) => set_layers(app, index, &changes, preserve_rb),
-        Some(LinkTarget::RemoteGoTo { file, destination, .. }) => remote_open = Some((view.id, file, destination)),
-        Some(LinkTarget::Other(s)) => app.notify_fmt("This PDF uses the unsupported {s} action.", &[("s", &s)]),
-        None => {}
-    }
+
     if tool == QuickTool::Crop && cropped {
         tool = QuickTool::Select;
     }
@@ -4514,6 +4498,9 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     if let Some((name, action)) = app.views[index].forms.button.take() {
         run_button(app, index, &name, action);
     }
+    if let Some(clicked) = clicked_link {
+        run_link(app, index, clicked);
+    }
     if copy_selected {
         app.execute("edit.copy");
     }
@@ -4521,9 +4508,6 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     // the quick tools come back with the window.
     if app.mode != crate::Mode::Read && !app.full_screen {
         quick_bar(app, avail, ui);
-    }
-    if let Some((source, file, destination)) = remote_open {
-        app.open_remote_link(source, file, destination);
     }
 }
 
@@ -4629,21 +4613,124 @@ fn selection_actions(
     false
 }
 
+/// The hover label to show for a link target.
+fn link_target_label(target: &LinkTarget, info: &DocInfo) -> String {
+    match target {
+        LinkTarget::Page(n, _) => crate::i18n::fmt(tl!("Go to page {p}"), &[("p", info.pages.get(*n).map(|p| p.label.as_str()).unwrap_or("?"))]),
+        LinkTarget::Uri(u) => u.clone(),
+        LinkTarget::SetLayers { .. } => tl!("Set layer visibility").to_string(),
+        LinkTarget::RemoteGoTo { file, .. } => file.clone(),
+        LinkTarget::Named(n) => match n.as_str() {
+            "NextPage" => tl!("Next page").to_string(),
+            "PrevPage" => tl!("Previous page").to_string(),
+            "FirstPage" => tl!("First page").to_string(),
+            "LastPage" => tl!("Last page").to_string(),
+            other => crate::i18n::fmt(tl!("{s} action"), &[("s", other)]),
+        },
+        LinkTarget::Hide { hide: true, .. } => tl!("Hide a field").to_string(),
+        LinkTarget::Hide { hide: false, .. } => tl!("Show a field").to_string(),
+        LinkTarget::ResetForm { .. } => tl!("Reset a form").to_string(),
+        LinkTarget::Sequence(seq) => seq.first().map(|a| link_target_label(a, info)).unwrap_or_default(),
+        LinkTarget::Other(s) => crate::i18n::fmt(tl!("{s} action"), &[("s", s)]),
+    }
+}
+
+/// Create an edit to show or hide the specified form fields.
+fn hide_fields_edit(session: &pdfcraft_engine::Session, id: pdfcraft_engine::DocId, fields: &[String], hide: bool) -> Option<pdfcraft_engine::Edit> {
+    let listed = |n: &String| fields.iter().any(|f| n == f || n.starts_with(&format!("{f}.")));
+    // `display.hidden` 1, `display.visible` 0, as a script setting `field.display` would.
+    let changes: Vec<pdfcraft_engine::FieldChange> = session
+        .get(id)
+        .map(|d| d.form.iter().filter(|f| listed(&f.name)).map(|f| f.name.clone()).collect::<Vec<_>>())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|name| pdfcraft_engine::FieldChange { name, value: None, read_only: None, required: None, display: Some(if hide { 1 } else { 0 }) })
+        .collect();
+    if !changes.is_empty() {
+        let label = if hide { "Hide a field" } else { "Show a field" };
+        Some(pdfcraft_engine::Edit::Batch { label: label.into(), edits: vec![pdfcraft_engine::Edit::ApplyScriptChanges { changes }] })
+    } else {
+        None
+    }
+}
+
+/// Create an edit to reset form fields to their defaults.
+fn reset_form_edit(session: &pdfcraft_engine::Session, id: pdfcraft_engine::DocId, fields: &[String], exclude: bool) -> pdfcraft_engine::Edit {
+    let all: Vec<String> = session.get(id).map(|d| d.form.iter().map(|f| f.name.clone()).collect()).unwrap_or_default();
+    let listed = |n: &String| fields.iter().any(|f| n == f || n.starts_with(&format!("{f}.")));
+    let names = match (fields.is_empty(), exclude) {
+        (true, _) => None,
+        (false, false) => Some(all.iter().filter(|n| listed(n)).cloned().collect()),
+        (false, true) => Some(all.iter().filter(|n| !listed(n)).cloned().collect()),
+    };
+    pdfcraft_engine::Edit::ResetForm { names }
+}
+
+/// Run an action or sequence of actions triggered by clicking a link annotation.
+fn run_link(app: &mut PdfCraftApp, index: usize, target: LinkTarget) {
+    let mut pending_edits = Vec::new();
+    run_link_target(app, index, &target, &mut pending_edits);
+    if pending_edits.len() == 1 {
+        app.views[index].pending_edit = pending_edits.pop();
+    } else if !pending_edits.is_empty() {
+        app.views[index].pending_edit = Some(pdfcraft_engine::Edit::Batch { label: "Link actions".into(), edits: pending_edits });
+    }
+}
+
+/// Recursively execute a link action or sequence.
+fn run_link_target(app: &mut PdfCraftApp, index: usize, target: &LinkTarget, pending_edits: &mut Vec<pdfcraft_engine::Edit>) {
+    let pages = app.session.get(app.views[index].id).map_or(0, |d| d.info.pages.len());
+    match target {
+        LinkTarget::Page(p, dest) => {
+            let doc_id = app.views[index].id;
+            if let Some(doc) = app.session.get(doc_id) {
+                let info = doc.info.clone();
+                app.views[index].go_to_dest(*p, *dest, &info);
+            }
+        }
+        LinkTarget::Uri(u) => app.request_document_url(u, crate::LinkOrigin::Link),
+        LinkTarget::SetLayers { changes, preserve_rb } => set_layers(app, index, changes, *preserve_rb),
+        LinkTarget::RemoteGoTo { file, destination, .. } => {
+            let doc_id = app.views[index].id;
+            app.open_remote_link(doc_id, file.clone(), destination.clone());
+        }
+        LinkTarget::Named(n) => match n.as_str() {
+            "NextPage" => app.views[index].step_page(true),
+            "PrevPage" => app.views[index].step_page(false),
+            "FirstPage" => app.views[index].go_to_page(0),
+            "LastPage" => app.views[index].go_to_page(pages.saturating_sub(1)),
+            "Print" => app.open_print(),
+            "SaveAs" => app.run_command("file.save_as"),
+            _ => {} // ISO 32000-2 Table 215: if the viewer does not recognise the name, it shall take no action.
+        },
+        LinkTarget::Hide { fields, hide } => {
+            let doc_id = app.views[index].id;
+            if let Some(edit) = hide_fields_edit(&app.session, doc_id, fields, *hide) {
+                pending_edits.push(edit);
+            }
+        }
+        LinkTarget::ResetForm { fields, exclude } => {
+            let doc_id = app.views[index].id;
+            app.views[index].forms.focus = None;
+            pending_edits.push(reset_form_edit(&app.session, doc_id, fields, *exclude));
+        }
+        LinkTarget::Sequence(seq) => {
+            for a in seq {
+                run_link_target(app, index, a, pending_edits);
+            }
+        }
+        LinkTarget::Other(s) => app.notify_fmt("This PDF uses the unsupported {s} action.", &[("s", s)]),
+    }
+}
+
 /// Run a push button's action (the ones that need no JavaScript engine).
 fn run_button(app: &mut PdfCraftApp, index: usize, name: &str, action: pdfcraft_engine::form_scripts::ButtonAction) {
     use pdfcraft_engine::form_scripts::ButtonAction as B;
     let pages = app.session.get(app.views[index].id).map_or(0, |d| d.info.pages.len());
     match action {
         B::Reset { fields, exclude } => {
-            let all: Vec<String> = app.session.get(app.views[index].id).map(|d| d.form.iter().map(|f| f.name.clone()).collect()).unwrap_or_default();
-            let listed = |n: &String| fields.iter().any(|f| n == f || n.starts_with(&format!("{f}.")));
-            let names = match (fields.is_empty(), exclude) {
-                (true, _) => None,
-                (false, false) => Some(all.iter().filter(|n| listed(n)).cloned().collect()),
-                (false, true) => Some(all.iter().filter(|n| !listed(n)).cloned().collect()),
-            };
             app.views[index].forms.focus = None;
-            app.views[index].pending_edit = Some(pdfcraft_engine::Edit::ResetForm { names });
+            app.views[index].pending_edit = Some(reset_form_edit(&app.session, app.views[index].id, &fields, exclude));
         }
         B::Named(n) => match n.as_str() {
             "Print" => app.open_print(),
@@ -4659,26 +4746,8 @@ fn run_button(app: &mut PdfCraftApp, index: usize, name: &str, action: pdfcraft_
         B::Uri(u) => app.request_document_url(&u, crate::LinkOrigin::Button),
         B::GoTo(p) => app.views[index].go_to_page(p.min(pages.saturating_sub(1))),
         B::ShowHide { fields, hide } => {
-            let listed = |n: &String| fields.iter().any(|f| n == f || n.starts_with(&format!("{f}.")));
-            // `display.hidden` 1, `display.visible` 0, as a script setting `field.display` would.
-            let changes: Vec<pdfcraft_engine::FieldChange> = app
-                .session
-                .get(app.views[index].id)
-                .map(|d| d.form.iter().filter(|f| listed(&f.name)).map(|f| f.name.clone()).collect::<Vec<_>>())
-                .unwrap_or_default()
-                .into_iter()
-                .map(|name| pdfcraft_engine::FieldChange {
-                    name,
-                    value: None,
-                    read_only: None,
-                    required: None,
-                    display: Some(if hide { 1 } else { 0 }),
-                })
-                .collect();
-            if !changes.is_empty() {
-                let label = if hide { "Hide a field" } else { "Show a field" };
-                app.views[index].pending_edit =
-                    Some(pdfcraft_engine::Edit::Batch { label: label.into(), edits: vec![pdfcraft_engine::Edit::ApplyScriptChanges { changes }] });
+            if let Some(edit) = hide_fields_edit(&app.session, app.views[index].id, &fields, hide) {
+                app.views[index].pending_edit = Some(edit);
             }
         }
         B::SetLayers { changes, preserve_rb } => {

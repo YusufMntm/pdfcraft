@@ -50,6 +50,18 @@ const MAX_ANNOTATION_BYTES: usize = 64 << 20;
 /// key does not fit is not listed.
 const MAX_LINK_ATTACHMENT_TEXT_BYTES: usize = 16 << 20;
 
+/// Maximum number of chained actions to inspect per link (ISO 32000-2 §12.6.2, Table 196).
+const MAX_ACTION_CHAIN: usize = 64;
+
+/// Whether a link target (or any action chained within it) is a JavaScript action.
+fn has_javascript_target(target: &LinkTarget) -> bool {
+    match target {
+        LinkTarget::Other(s) if s == "JavaScript" => true,
+        LinkTarget::Sequence(seq) => seq.iter().any(has_javascript_target),
+        _ => false,
+    }
+}
+
 /// The bytes a listed annotation keeps.
 fn retained(a: &Annotation) -> usize {
     let text = [&a.author, &a.contents, &a.modified, &a.name, &a.in_reply_to, &a.state, &a.intent];
@@ -321,23 +333,25 @@ pub struct Link {
 pub enum LinkTarget {
     /// A destination in this document: the 0-based page and where on it the view goes.
     Page(usize, DestView),
+    /// A web address (`URI`, ISO 32000-2 §12.6.4.8).
     Uri(String),
     /// A set-layer-visibility action (`SetOCGState`, ISO 32000-2 §12.6.4.13): each change in
     /// order, naming the layer by its optional content group. With `preserve_rb`, a layer turned
     /// on turns off the other layers of its radio-button groups.
-    SetLayers {
-        changes: Vec<(LayerOp, (u32, u16))>,
-        preserve_rb: bool,
-    },
+    SetLayers { changes: Vec<(LayerOp, (u32, u16))>, preserve_rb: bool },
     /// A local-file remote Go-To action. The caller resolves `file` relative to the source path.
     /// `launch` marks a Launch action that names a PDF file (see `launch_pdf`), opened the same
     /// way: as a document in PdfCraft, never by the operating system.
-    RemoteGoTo {
-        launch: bool,
-        file: String,
-        destination: RemoteDestination,
-        new_window: Option<bool>,
-    },
+    RemoteGoTo { launch: bool, file: String, destination: RemoteDestination, new_window: Option<bool> },
+    /// A named action (ISO 32000-2 §12.6.4.12, Table 215): NextPage, PrevPage, FirstPage, LastPage.
+    Named(String),
+    /// A hide action (ISO 32000-2 §12.6.4.11, Table 214): show or hide the named fields.
+    Hide { fields: Vec<String>, hide: bool },
+    /// A reset-form action (ISO 32000-2 §12.7.6.3, Tables 241-242): reset the listed fields, or all except them.
+    ResetForm { fields: Vec<String>, exclude: bool },
+    /// A sequence of actions chained via `/Next` (ISO 32000-2 §12.6.2, Table 196).
+    Sequence(Vec<LinkTarget>),
+    /// An action of another type, kept as its action name.
     Other(String),
 }
 
@@ -1445,7 +1459,7 @@ impl<'a> Inspector<'a> {
             }
             if subtype == "Link" {
                 if let Some(link) = self.link(page, index, d, text_budget) {
-                    if matches!(&link.target, LinkTarget::Other(s) if s == "JavaScript") {
+                    if has_javascript_target(&link.target) {
                         info.has_javascript = true;
                     }
                     info.links.push(link);
@@ -1535,33 +1549,164 @@ impl<'a> Inspector<'a> {
         link_replies(&mut info.annotations);
     }
 
+    /// Read a link annotation on `page` into a [`Link`].
     fn link(&self, page: usize, index: usize, d: &Dictionary, text_budget: &mut usize) -> Option<Link> {
         let rect = rect4(self.resolve(d.get(b"Rect").ok()?));
         let target = if let Ok(dest) = d.get(b"Dest") {
             let (page, view) = self.dest(dest, 0)?;
             LinkTarget::Page(page, view)
         } else {
-            let a = d.get(b"A").ok().and_then(|a| self.dict(a))?;
-            match self.name(a, b"S").as_deref() {
-                Some("GoTo") => {
-                    let (page, view) = self.dest(a.get(b"D").ok()?, 0)?;
-                    LinkTarget::Page(page, view)
-                }
-                Some("URI") => {
-                    let uri = a.get(b"URI").ok().and_then(|u| self.resolve(u).as_str().ok())?;
-                    match spend(uri, text_budget, |b| String::from_utf8_lossy(b).into_owned()) {
-                        Some(uri) => LinkTarget::Uri(uri),
-                        None => LinkTarget::Other("URI".into()),
-                    }
-                }
-                Some("SetOCGState") => self.layer_state(a),
-                Some("GoToR") => self.remote_go_to(a).unwrap_or_else(|| LinkTarget::Other("GoToR".into())),
-                Some("Launch") => self.launch_pdf(a).unwrap_or_else(|| LinkTarget::Other("Launch".into())),
-                Some(other) => LinkTarget::Other(other.to_string()),
-                None => return None,
+            let a_obj = d.get(b"A").ok()?;
+            let a = self.dict(a_obj)?;
+            let mut targets = Vec::new();
+            let mut seen = HashSet::new();
+            if let Object::Reference(id) = a_obj {
+                seen.insert(*id);
+            }
+            self.collect_actions(a, &mut targets, &mut seen, text_budget, 0);
+            match targets.len() {
+                0 => return None,
+                1 => targets.swap_remove(0),
+                _ => LinkTarget::Sequence(targets),
             }
         };
         Some(Link { page, index, rect, target })
+    }
+
+    /// Collect the action in `a` and any actions chained after it via `/Next` (§12.6.2, Table 196),
+    /// bounded to prevent cycles.
+    fn collect_actions(&self, a: &'a Dictionary, targets: &mut Vec<LinkTarget>, seen: &mut HashSet<ObjectId>, text_budget: &mut usize, depth: usize) {
+        if depth >= MAX_ACTION_CHAIN || targets.len() >= MAX_ACTION_CHAIN {
+            return;
+        }
+        if let Some(target) = self.single_action(a, text_budget) {
+            targets.push(target);
+        }
+        let Ok(next) = a.get(b"Next") else { return };
+        if let Object::Reference(id) = next
+            && !seen.insert(*id)
+        {
+            return;
+        }
+        match self.resolve(next) {
+            Object::Dictionary(d) => {
+                self.collect_actions(d, targets, seen, text_budget, depth + 1);
+            }
+            Object::Array(items) => {
+                for item in items {
+                    if targets.len() >= MAX_ACTION_CHAIN {
+                        break;
+                    }
+                    if let Object::Reference(id) = item
+                        && !seen.insert(*id)
+                    {
+                        continue;
+                    }
+                    if let Some(d) = self.dict(item) {
+                        self.collect_actions(d, targets, seen, text_budget, depth + 1);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Parse a single action dictionary into a [`LinkTarget`].
+    fn single_action(&self, a: &'a Dictionary, text_budget: &mut usize) -> Option<LinkTarget> {
+        match self.name(a, b"S").as_deref() {
+            Some("GoTo") => {
+                let (page, view) = self.dest(a.get(b"D").ok()?, 0)?;
+                Some(LinkTarget::Page(page, view))
+            }
+            Some("URI") => {
+                let uri = a.get(b"URI").ok().and_then(|u| self.resolve(u).as_str().ok())?;
+                match spend(uri, text_budget, |b| String::from_utf8_lossy(b).into_owned()) {
+                    Some(uri) => Some(LinkTarget::Uri(uri)),
+                    None => Some(LinkTarget::Other("URI".into())),
+                }
+            }
+            Some("SetOCGState") => Some(self.layer_state(a)),
+            Some("GoToR") => Some(self.remote_go_to(a).unwrap_or_else(|| LinkTarget::Other("GoToR".into()))),
+            Some("Launch") => Some(self.launch_pdf(a).unwrap_or_else(|| LinkTarget::Other("Launch".into()))),
+            Some("Named") => {
+                let n = self.name(a, b"N").unwrap_or_default();
+                Some(LinkTarget::Named(n))
+            }
+            Some("Hide") => {
+                let fields = self.hide_targets(a);
+                let hide = !matches!(a.get(b"H").ok().map(|h| self.resolve(h)), Some(Object::Boolean(false)));
+                Some(LinkTarget::Hide { fields, hide })
+            }
+            Some("ResetForm") => {
+                let fields = self.reset_form_targets(a);
+                let exclude = a.get(b"Flags").ok().and_then(|f| self.resolve(f).as_i64().ok()).unwrap_or(0) & 1 != 0;
+                Some(LinkTarget::ResetForm { fields, exclude })
+            }
+            Some(other) => Some(LinkTarget::Other(other.to_string())),
+            None => None,
+        }
+    }
+
+    /// The target field names of a Hide action (§12.6.4.11, Table 214).
+    fn hide_targets(&self, a: &Dictionary) -> Vec<String> {
+        let Ok(t) = a.get(b"T") else { return Vec::new() };
+        match self.resolve(t) {
+            Object::Array(items) => items.iter().filter_map(|item| self.field_target_name(item)).collect(),
+            _ => self.field_target_name(t).into_iter().collect(),
+        }
+    }
+
+    /// The field names listed in a ResetForm action (§12.7.6.3, Table 241).
+    fn reset_form_targets(&self, a: &Dictionary) -> Vec<String> {
+        let Ok(f) = a.get(b"Fields") else { return Vec::new() };
+        match self.resolve(f) {
+            Object::Array(items) => items.iter().filter_map(|item| self.field_target_name(item)).collect(),
+            _ => self.field_target_name(f).into_iter().collect(),
+        }
+    }
+
+    /// Resolves an action target object (string, name, or indirect reference) to a field name.
+    fn field_target_name(&self, item: &'a Object) -> Option<String> {
+        match self.resolve(item) {
+            Object::String(bytes, _) => Some(text_string(bytes)),
+            Object::Name(bytes) => Some(String::from_utf8_lossy(bytes).into_owned()),
+            Object::Dictionary(d) => {
+                if let Object::Reference(id) = item {
+                    self.field_qualified_name(*id)
+                } else {
+                    self.text(d, b"T")
+                }
+            }
+            _ => {
+                if let Object::Reference(id) = item {
+                    self.field_qualified_name(*id)
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    /// The fully qualified name of the field that `id` belongs to, from the partial names (`/T`)
+    /// up its `/Parent` chain.
+    fn field_qualified_name(&self, id: ObjectId) -> Option<String> {
+        let mut parts = Vec::new();
+        let mut cur = id;
+        let mut seen = HashSet::new();
+        while seen.insert(cur) && parts.len() < 32 {
+            let Ok(d) = self.doc.get_dictionary(cur) else { break };
+            if let Some(t) = self.text(d, b"T") {
+                parts.push(t);
+            }
+            match d.get(b"Parent").map(|p| self.resolve(p)) {
+                Ok(Object::Reference(parent_id)) => cur = *parent_id,
+                _ => break,
+            }
+        }
+        (!parts.is_empty()).then(|| {
+            parts.reverse();
+            parts.join(".")
+        })
     }
 
     fn remote_go_to(&self, action: &Dictionary) -> Option<LinkTarget> {
@@ -3430,6 +3575,55 @@ trailer << /Root 1 0 R >>
                 LinkTarget::SetLayers { changes: vec![(Off, (5, 0))], preserve_rb: true },
             ]
         );
+    }
+
+    /// Links with Named, Hide, ResetForm actions and /Next chains (§12.6.4.11, §12.6.4.12, §12.7.6.3, §12.6.2).
+    #[test]
+    fn links_read_named_hide_and_reset_form_actions() {
+        let pdf = "%PDF-1.7\n\
+            1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R 5 0 R] >> >> endobj\n\
+            2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 400] >> endobj\n\
+            3 0 obj << /Type /Page /Parent 2 0 R /Annots [10 0 R 11 0 R 12 0 R 13 0 R 14 0 R 15 0 R] >> endobj\n\
+            4 0 obj << /Type /Annot /Subtype /Widget /FT /Tx /T (secret) /Rect [10 10 50 30] >> endobj\n\
+            5 0 obj << /Type /Annot /Subtype /Widget /FT /Tx /T (f1) /Rect [60 10 100 30] >> endobj\n\
+            10 0 obj << /Type /Annot /Subtype /Link /Rect [0 0 10 10] /A << /S /Named /N /NextPage >> >> endobj\n\
+            11 0 obj << /Type /Annot /Subtype /Link /Rect [0 10 10 20] /A << /S /Named /N /Bogus >> >> endobj\n\
+            12 0 obj << /Type /Annot /Subtype /Link /Rect [0 20 10 30] /A << /S /Hide /T (secret) >> >> endobj\n\
+            13 0 obj << /Type /Annot /Subtype /Link /Rect [0 30 10 40] /A << /S /Hide /T 4 0 R /H false >> >> endobj\n\
+            14 0 obj << /Type /Annot /Subtype /Link /Rect [0 40 10 50] /A << /S /ResetForm /Fields [(f1)] /Flags 0 >> >> endobj\n\
+            15 0 obj << /Type /Annot /Subtype /Link /Rect [0 50 10 60] /A << /S /ResetForm /Fields [5 0 R] /Flags 1 >> >> endobj\n\
+            trailer << /Root 1 0 R >>\n%%EOF";
+        let info = inspect(Arc::new(pdf.as_bytes().to_vec()), None).expect("opens");
+        let targets: Vec<_> = info.links.iter().map(|l| l.target.clone()).collect();
+        assert_eq!(
+            targets,
+            [
+                LinkTarget::Named("NextPage".into()),
+                LinkTarget::Named("Bogus".into()),
+                LinkTarget::Hide { fields: vec!["secret".into()], hide: true },
+                LinkTarget::Hide { fields: vec!["secret".into()], hide: false },
+                LinkTarget::ResetForm { fields: vec!["f1".into()], exclude: false },
+                LinkTarget::ResetForm { fields: vec!["f1".into()], exclude: true },
+            ]
+        );
+    }
+
+    /// Links with /Next chains execute actions in sequence, and cycles are bounded without hanging.
+    #[test]
+    fn links_read_next_action_chains_and_guard_against_cycles() {
+        let pdf = "%PDF-1.7\n\
+            1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n\
+            2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 400] >> endobj\n\
+            3 0 obj << /Type /Page /Parent 2 0 R /Annots [10 0 R 20 0 R] >> endobj\n\
+            10 0 obj << /Type /Annot /Subtype /Link /Rect [0 0 10 10] /A << /S /Named /N /NextPage /Next << /S /GoTo /D [3 0 R /Fit] >> >> >> endobj\n\
+            20 0 obj << /Type /Annot /Subtype /Link /Rect [0 10 10 20] /A 21 0 R >> endobj\n\
+            21 0 obj << /S /Named /N /FirstPage /Next 22 0 R >> endobj\n\
+            22 0 obj << /S /Named /N /LastPage /Next 21 0 R >> endobj\n\
+            trailer << /Root 1 0 R >>\n%%EOF";
+        let info = inspect(Arc::new(pdf.as_bytes().to_vec()), None).expect("opens");
+        assert_eq!(info.links[0].target, LinkTarget::Sequence(vec![LinkTarget::Named("NextPage".into()), LinkTarget::Page(0, DestView::Fit)]));
+        let LinkTarget::Sequence(chain) = &info.links[1].target else { panic!("expected sequence") };
+        assert_eq!(chain, &[LinkTarget::Named("FirstPage".into()), LinkTarget::Named("LastPage".into())]);
     }
 
     /// #4168: a Launch action naming a `.pdf` file is read as the link to that file it amounts
