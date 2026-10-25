@@ -500,6 +500,7 @@ impl PdfCraftApp {
             {
                 focus.text = crate::forms_ui::draft_text(field);
                 focus.picked = field.value.clone();
+                focus.picked_row = field.indices.last().copied();
             }
             if let Some(page) = signature_page
                 && let Some(view) = self.views.get_mut(i)
@@ -1609,6 +1610,7 @@ mod revert_draft_tests {
             widget: 0,
             text: text.into(),
             picked: Vec::new(),
+            picked_row: None,
             request_focus: false,
             select_all: false,
             press: None,

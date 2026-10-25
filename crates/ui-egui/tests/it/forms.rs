@@ -1355,6 +1355,120 @@ fn list_box_options_sharing_export_value_selects_and_saves_exact_row() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Multi-select list box: Shift selection anchors on the last Ctrl-picked row,
+/// and ArrowDown moves from that last picked row (#4531).
+#[test]
+fn list_box_shift_select_and_arrows_anchor_on_last_picked_row() {
+    let dir = scratch("list-anchor");
+    let out = dir.join("saved.pdf");
+    let bytes = pdf_from_objects(&[
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R] /DA (/Helv 10 Tf 0 g) /DR << /Font << /Helv 5 0 R >> >> >> >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 400 400] >>",
+        "<< /Type /Page /Parent 2 0 R /Annots [4 0 R] >>",
+        "<< /Type /Annot /Subtype /Widget /FT /Ch /T (Choices) /Ff 2097152 /Opt [(A) (B) (C) (D)] /Rect [50 200 200 300] /P 3 0 R /F 4 >>",
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+    ]);
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("anchor.pdf", None, bytes).unwrap();
+        app.set_option("left", "closed").unwrap();
+        app.set_option("zoom", "100").unwrap();
+        app
+    });
+    h.run_steps(4);
+
+    let r = {
+        let s = h.state();
+        let doc = s.session.get(s.views[0].id).unwrap();
+        let f = doc.form.iter().find(|f| f.name == "Choices").unwrap();
+        pdfcraft_ui_egui::forms_ui::field_screen_rect(&s.views[0], &doc.info, f, 0).expect("on screen")
+    };
+    let zoom = r.height() / 100.0;
+    let p_b = egui::pos2(r.center().x, r.min.y + 19.0 * zoom);
+    let p_c = egui::pos2(r.center().x, r.min.y + 30.0 * zoom);
+    let p_d = egui::pos2(r.center().x, r.min.y + 42.0 * zoom);
+
+    // 1. Click row D (index 3)
+    h.hover_at(p_d);
+    h.run_steps(1);
+    h.drag_at(p_d);
+    h.run_steps(1);
+    h.drop_at(p_d);
+    h.run_steps(3);
+    assert_eq!(value(&h, "Choices"), ["D"]);
+
+    // 2. Ctrl-click row B (index 1)
+    h.hover_at(p_b);
+    h.run_steps(1);
+    h.event(egui::Event::PointerMoved(p_b));
+    h.event(egui::Event::ModifiersChanged(egui::Modifiers::COMMAND));
+    h.event(egui::Event::PointerButton { pos: p_b, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::COMMAND });
+    h.run_steps(1);
+    h.event(egui::Event::PointerButton { pos: p_b, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::COMMAND });
+    h.event(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+    h.run_steps(3);
+    assert_eq!(value(&h, "Choices"), ["B", "D"]);
+
+    // 3. Shift-click row C (index 2) -> should select B and C (indices 1..=2)
+    h.hover_at(p_c);
+    h.run_steps(1);
+    h.event(egui::Event::PointerMoved(p_c));
+    h.event(egui::Event::ModifiersChanged(egui::Modifiers::SHIFT));
+    h.event(egui::Event::PointerButton { pos: p_c, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::SHIFT });
+    h.run_steps(1);
+    h.event(egui::Event::PointerButton { pos: p_c, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::SHIFT });
+    h.event(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+    h.run_steps(3);
+
+    assert_eq!(value(&h, "Choices"), ["B", "C"], "Shift-click anchors on last Ctrl-picked row B, selecting B-C");
+    {
+        let s = h.state();
+        let doc = s.session.get(s.views[0].id).unwrap();
+        let f = doc.form.iter().find(|f| f.name == "Choices").unwrap();
+        assert_eq!(f.indices, [1, 2]);
+    }
+
+    // Save and verify /V [B C] and /I [1 2]
+    h.state_mut().save_override = Some(out.to_string_lossy().into_owned());
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::S);
+    wait_for_file(&mut h, &out);
+
+    let mut check_app = PdfCraftApp::new();
+    check_app.set_option("language", "en").unwrap();
+    check_app.open_bytes("saved.pdf", None, std::fs::read(&out).unwrap()).unwrap();
+    let doc = check_app.session.get(check_app.views[0].id).unwrap();
+    let d = doc.form.iter().find(|f| f.name == "Choices").unwrap();
+    assert_eq!(d.value, ["B", "C"], "saved /V keeps [B, C]");
+    assert_eq!(d.indices, [1, 2], "saved /I keeps [1, 2]");
+
+    // Test ArrowDown: Click D, Ctrl-click B, then ArrowDown -> moves to C
+    h.hover_at(p_d);
+    h.run_steps(1);
+    h.drag_at(p_d);
+    h.run_steps(1);
+    h.drop_at(p_d);
+    h.run_steps(3);
+    assert_eq!(value(&h, "Choices"), ["D"]);
+
+    h.hover_at(p_b);
+    h.run_steps(1);
+    h.event(egui::Event::PointerMoved(p_b));
+    h.event(egui::Event::ModifiersChanged(egui::Modifiers::COMMAND));
+    h.event(egui::Event::PointerButton { pos: p_b, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::COMMAND });
+    h.run_steps(1);
+    h.event(egui::Event::PointerButton { pos: p_b, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::COMMAND });
+    h.event(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+    h.run_steps(3);
+    assert_eq!(value(&h, "Choices"), ["B", "D"]);
+
+    h.key_press(egui::Key::ArrowDown);
+    h.run_steps(3);
+    assert_eq!(value(&h, "Choices"), ["C"], "ArrowDown from B moves to C");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Auto-size (`0 Tf`, inherited from the AcroForm) single-line and multiline fields, and a fixed 10 pt one.
 fn auto_size_form() -> Vec<u8> {
     pdf_from_objects(&[

@@ -30,6 +30,8 @@ pub struct Focus {
     pub text: String,
     /// Choices picked so far (list boxes with multiple selection).
     pub picked: Vec<String>,
+    /// Last option row clicked or moved to in a list box (anchors Shift selection and directs arrows).
+    pub picked_row: Option<usize>,
     pub request_focus: bool,
     /// Select the whole value when the editor opens (entered with Tab), so typing replaces it.
     pub select_all: bool,
@@ -115,6 +117,7 @@ fn open_focus(f: &FormField, widget: usize) -> Focus {
         widget,
         text: draft_text(f),
         picked: f.value.clone(),
+        picked_row: f.indices.last().copied(),
         request_focus: true,
         select_all: false,
         press: None,
@@ -249,8 +252,10 @@ pub(crate) fn page_input(
             }
         }
         FormFieldKind::List => {
-            commit(view, form);
-            view.forms.focus = Some(open_focus(f, wi));
+            if view.forms.focus.as_ref().is_none_or(|x| x.name != f.name || x.widget != wi) {
+                commit(view, form);
+                view.forms.focus = Some(open_focus(f, wi));
+            }
             let r = widget_rect(xf, info, page, w.rect);
             let height_pt = if matches!(w.rotation, 90 | 270) { (w.rect[2] - w.rect[0]).max(1.0) } else { (w.rect[3] - w.rect[1]).max(1.0) };
             let zoom = (r.height() as f64) / height_pt;
@@ -271,12 +276,15 @@ pub(crate) fn page_input(
                     }
                     picked
                 } else if multi && shift && !f.indices.is_empty() {
-                    let anchor = f.indices.last().copied().unwrap_or(opt_idx);
+                    let anchor = view.forms.focus.as_ref().and_then(|x| x.picked_row).or_else(|| f.indices.last().copied()).unwrap_or(opt_idx);
                     let (min, max) = (anchor.min(opt_idx), anchor.max(opt_idx));
                     (min..=max).collect()
                 } else {
                     vec![opt_idx]
                 };
+                if let Some(fx) = view.forms.focus.as_mut() {
+                    fx.picked_row = Some(opt_idx);
+                }
                 if new_indices != f.indices {
                     view.pending_edit = Some(Edit::SetFieldValue { name: f.name.clone(), value: FieldValue::ChoiceIndices(new_indices) });
                 }
@@ -777,6 +785,9 @@ pub(crate) fn overlay(
                             for (idx, (_export, display)) in f.options.iter().enumerate() {
                                 let on = f.indices.contains(&idx);
                                 if ui.selectable_label(on, display).clicked() {
+                                    if let Some(fx) = view.forms.focus.as_mut() {
+                                        fx.picked_row = Some(idx);
+                                    }
                                     edit = Some(Edit::SetFieldValue { name: f.name.clone(), value: FieldValue::ChoiceIndices(vec![idx]) });
                                     close = true;
                                 }
@@ -813,9 +824,12 @@ pub(crate) fn overlay(
             } else if tab {
                 next = Some(!shift);
             } else if (up || down) && !f.options.is_empty() {
-                let current_idx = f.indices.last().copied().unwrap_or(0);
+                let current_idx = view.forms.focus.as_ref().and_then(|x| x.picked_row).or_else(|| f.indices.last().copied()).unwrap_or(0);
                 let next_idx = if up { current_idx.saturating_sub(1) } else { (current_idx + 1).min(f.options.len().saturating_sub(1)) };
                 if (f.indices.as_slice() != [next_idx]) && next_idx < f.options.len() {
+                    if let Some(fx) = view.forms.focus.as_mut() {
+                        fx.picked_row = Some(next_idx);
+                    }
                     edit = Some(Edit::SetFieldValue { name: f.name.clone(), value: FieldValue::ChoiceIndices(vec![next_idx]) });
                 }
             }
