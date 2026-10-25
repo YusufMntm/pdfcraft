@@ -1438,6 +1438,53 @@ fn deleting_widget_from_duplicated_checked_checkbox_preserves_value() {
     assert!(!fields(&doc).iter().any(|field| field.name == name));
 }
 
+/// Deleting a selected radio button without unison resets /V when the matching remaining
+/// button has /AS /Off, but preserves /V when unison is enabled or a remaining button is on (#4609).
+#[test]
+fn deleting_radio_button_checks_unison_and_selection_state() {
+    // 1. Without RadiosInUnison: two buttons with same on-state "Choice1".
+    let mut doc = one_page();
+    add_field(&mut doc, 0, [50.0, 480.0, 64.0, 494.0], &NewField::Radio { group: None, export: "Choice1".into() }, None).unwrap();
+    add_field(&mut doc, 0, [80.0, 480.0, 94.0, 494.0], &NewField::Radio { group: Some("Group1".into()), export: "Choice1".into() }, None).unwrap();
+
+    let all = fields(&doc);
+    let f = field(&all, "Group1");
+    assert_eq!(f.widgets.len(), 2);
+    // Explicitly select widget 0, keeping widget 1 Off.
+    doc.update_dict(f.obj, |d| d.set(b"V".to_vec(), Object::name("Choice1"))).unwrap();
+    doc.update_dict(f.widgets[0].obj, |d| d.set(b"AS".to_vec(), Object::name("Choice1"))).unwrap();
+    doc.update_dict(f.widgets[1].obj, |d| d.set(b"AS".to_vec(), Object::name("Off"))).unwrap();
+
+    // Deleting widget 0 resets /V to Off because widget 1 is not selected and not in unison.
+    delete_widget(&mut doc, "Group1", 0).unwrap();
+    let all = fields(&doc);
+    let f = field(&all, "Group1");
+    assert_eq!(f.widgets.len(), 1);
+    assert!(f.value.is_empty() || f.value == ["Off"]);
+    let obj = doc.get(f.widgets[0].obj);
+    let remaining_as = obj.as_dict().and_then(|d| d.get(b"AS")).and_then(|o| o.as_name());
+    assert_eq!(remaining_as, Some(b"Off".as_slice()));
+
+    // 2. With RadiosInUnison: /V is preserved when deleting one of the buttons.
+    let mut doc = one_page();
+    add_field(&mut doc, 0, [50.0, 480.0, 64.0, 494.0], &NewField::Radio { group: Some("Group2".into()), export: "Choice1".into() }, None).unwrap();
+    add_field(&mut doc, 0, [80.0, 480.0, 94.0, 494.0], &NewField::Radio { group: Some("Group2".into()), export: "Choice1".into() }, None).unwrap();
+    let all = fields(&doc);
+    let f = field(&all, "Group2");
+    // Enable RADIOS_IN_UNISON flag on the field.
+    doc.update_dict(f.obj, |d| {
+        d.set(b"Ff".to_vec(), Object::Int(flags::RADIOS_IN_UNISON as i64));
+        d.set(b"V".to_vec(), Object::name("Choice1"));
+    })
+    .unwrap();
+
+    delete_widget(&mut doc, "Group2", 0).unwrap();
+    let all = fields(&doc);
+    let f = field(&all, "Group2");
+    assert_eq!(f.widgets.len(), 1);
+    assert_eq!(f.value, ["Choice1"]);
+}
+
 /// A parent `MASTER` with kids `a` and `b` (each a field merged with its widget) and `e` (a field
 /// with two widget kids), and the top-level fields `c` and `d`.
 fn dotted_form() -> Document {
