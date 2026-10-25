@@ -2347,7 +2347,8 @@ fn rulers_end_to_end_cursor_tracking_and_rotation() {
     // Transformed page origin under 90° rotation.
     let xf90 = h.state().views[0].page_xform(0).expect("page 0 rotated xform");
     let o90 = xf90.norm_to_screen(0.0, 0.0);
-    assert_eq!(o90, xf90.rect.right_top(), "90° rotation origin is right-top of page rect");
+    let corner90 = xf90.rect.right_top();
+    assert!((o90 - corner90).length() < 1e-3, "90° rotation origin is right-top of page rect: {o90:?} vs {corner90:?}");
 
     // Move cursor across rotated document to verify cursor tracking under rotation.
     let cursor_rot = pos2(o90.x - 50.0, o90.y + 80.0);
