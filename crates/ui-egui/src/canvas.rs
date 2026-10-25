@@ -4717,8 +4717,7 @@ fn run_link_target(app: &mut PdfCraftApp, index: usize, target: &LinkTarget, pen
         LinkTarget::Page(p, dest) => {
             let doc_id = app.views[index].id;
             if let Some(doc) = app.session.get(doc_id) {
-                let info = doc.info.clone();
-                app.views[index].go_to_dest(*p, *dest, &info);
+                app.views[index].go_to_dest(*p, *dest, &doc.info);
             }
         }
         LinkTarget::Uri(u) => app.request_document_url(u, crate::LinkOrigin::Link),
