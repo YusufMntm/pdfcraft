@@ -64,6 +64,7 @@ fn remote_link_pdf(file: &str, destination: Option<&str>) -> Vec<u8> {
     bytes
 }
 
+/// Create a synthetic PDF containing embedded PDF attachments and GoToE link actions for testing.
 fn gotoe_fixture_pdf() -> Vec<u8> {
     let inner = fixture(2);
     let mut stream_obj = format!("<< /Type /EmbeddedFile /Subtype /application#2Fpdf /Length {} >>\nstream\n", inner.len()).into_bytes();
@@ -5351,6 +5352,7 @@ fn local_gotor_link_open_applies_destinations_and_honors_root() {
     );
 }
 
+/// Test that headless `link_open` opens attached child PDFs and applies destination views (#4529).
 #[test]
 fn embedded_gotoe_link_open_applies_destinations() {
     let (_base, root) = sandbox("gotoe-open");

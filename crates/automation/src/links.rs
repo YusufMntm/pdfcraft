@@ -99,6 +99,7 @@ impl Automation {
         Ok(json!({ "count": items.len(), "links": items }))
     }
 
+    /// Open a linked PDF referenced by a GoToR or GoToE link action.
     pub(crate) fn link_open(&mut self, a: &Args) -> Result<Value> {
         let page_number = a.int("page")?;
         let index_number = a.int("index")?;
@@ -160,8 +161,8 @@ impl Automation {
                             return Err(failed("navigating to the parent document is not supported"));
                         }
                         pdfcraft_render::EmbeddedTarget::Name(name) => source.info.attachments.iter().find(|a| match &a.source {
-                            pdfcraft_render::AttachmentSource::Document { key } => key == name || &a.name == name,
-                            pdfcraft_render::AttachmentSource::Annotation { .. } => &a.name == name,
+                            pdfcraft_render::AttachmentSource::Document { key } => key == name,
+                            pdfcraft_render::AttachmentSource::Annotation { .. } => false,
                         }),
                         pdfcraft_render::EmbeddedTarget::Annotation { page, index } => source
                             .info
@@ -254,6 +255,7 @@ impl Automation {
     }
 }
 
+/// Serialize a destination view into a JSON object for link reporting.
 fn dest_view_value(view: DestView) -> Value {
     match view {
         DestView::Top => json!({ "kind": "top" }),
@@ -265,6 +267,7 @@ fn dest_view_value(view: DestView) -> Value {
     }
 }
 
+/// Apply a remote destination to an opened document, validating page bounds and returning destination status.
 fn apply_destination_to_opened(destination: &RemoteDestination, opened_pages: usize) -> (bool, Value, Option<&'static str>) {
     match destination {
         RemoteDestination::Default => (true, json!({ "kind": "default" }), None),

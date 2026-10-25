@@ -1402,6 +1402,7 @@ impl PdfCraftApp {
         self.try_open_with_destination(name, path, std::sync::Arc::new(bytes), None, true, destination)
     }
 
+    /// Open a document from memory, optionally activating the newly opened tab.
     fn open_bytes_with_focus(&mut self, name: &str, path: Option<String>, bytes: Vec<u8>, activate: bool) -> Result<(), String> {
         // Images and text files become new, unsaved PDFs (Create a PDF).
         let active = self.active;
@@ -1538,6 +1539,7 @@ impl PdfCraftApp {
         }
     }
 
+    /// Try opening a document synchronously, prompting for a password if encrypted.
     fn try_open(
         &mut self,
         name: &str,
@@ -1549,6 +1551,7 @@ impl PdfCraftApp {
         self.try_open_with_destination(name, path, bytes, password, activate, None)
     }
 
+    /// Try opening a document synchronously and apply a destination once admitted.
     fn try_open_with_destination(
         &mut self,
         name: &str,
@@ -2063,6 +2066,7 @@ impl PdfCraftApp {
         let _ = path;
     }
 
+    /// Follow a cross-PDF GoToR link action, resolving the target path and requesting consent if absolute.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn open_remote_link(&mut self, source: DocId, file: String, destination: pdfcraft_render::RemoteDestination) {
         if self.pending_remote_link.is_some() || self.pending_link.is_some() {
@@ -2095,6 +2099,7 @@ impl PdfCraftApp {
         }
     }
 
+    /// Schedule opening a verified remote link path in the background worker.
     #[cfg(not(target_arch = "wasm32"))]
     fn open_resolved_remote_link(&mut self, path: std::path::PathBuf, destination: pdfcraft_render::RemoteDestination) {
         let path = path.to_string_lossy().into_owned();
@@ -2127,6 +2132,7 @@ impl PdfCraftApp {
         self.pending_remote_link = None;
     }
 
+    /// Apply a remote destination (page view or named destination) to the most recently opened tab.
     fn apply_remote_destination(&mut self, destination: pdfcraft_render::RemoteDestination) {
         let Some(index) = self.views.len().checked_sub(1) else { return };
         let Some(doc) = self.session.get(self.views[index].id) else { return };
@@ -2159,8 +2165,8 @@ impl PdfCraftApp {
             }
             pdfcraft_render::EmbeddedTarget::Name(name) => {
                 let att = source_doc.info.attachments.iter().find(|a| match &a.source {
-                    pdfcraft_render::AttachmentSource::Document { key } => key == &name || a.name == name,
-                    pdfcraft_render::AttachmentSource::Annotation { .. } => a.name == name,
+                    pdfcraft_render::AttachmentSource::Document { key } => key == &name,
+                    pdfcraft_render::AttachmentSource::Annotation { .. } => false,
                 });
                 let Some(att) = att else {
                     self.notify_fmt("Couldn't follow linked PDF: {reason}", &[("reason", tl!("the attached file was not found"))]);

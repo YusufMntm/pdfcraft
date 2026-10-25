@@ -2617,6 +2617,7 @@ fn summary(d: &Document) -> Value {
     })
 }
 
+/// Build detailed document metadata and structure summary for `doc_info`.
 fn info(d: &Document) -> Value {
     let i = &d.info;
     let page1 = |p: usize| p + 1;

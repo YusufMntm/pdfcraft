@@ -85,6 +85,7 @@ fn remote_harness(source_path: Option<String>, file: &str, destination: &str) ->
     h
 }
 
+/// Build a synthetic fixture containing GoToE links targeting child, parent, and missing documents.
 fn gotoe_fixture() -> Vec<u8> {
     let inner = linked_pages(2, None);
     let mut stream_obj = format!("<< /Type /EmbeddedFile /Subtype /application#2Fpdf /Length {} >>\nstream\n", inner.len()).into_bytes();
@@ -117,6 +118,7 @@ fn gotoe_fixture() -> Vec<u8> {
     out
 }
 
+/// Harness configured with the GoToE fixture PDF.
 fn gotoe_harness() -> Harness<'static, PdfCraftApp> {
     let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
         let mut app = PdfCraftApp::new();
@@ -225,6 +227,7 @@ fn a_local_gotor_link_opens_in_a_tab_and_applies_its_destination() {
     assert_eq!(h.state().last_opened_url, None, "no URL or external launcher is involved");
 }
 
+/// An embedded Go-To link opens the attached child PDF in a new tab and applies its destination.
 #[test]
 fn an_embedded_gotoe_link_opens_in_a_tab_and_applies_its_destination() {
     let _gpu = gpu();
@@ -241,6 +244,7 @@ fn an_embedded_gotoe_link_opens_in_a_tab_and_applies_its_destination() {
     assert_eq!(h.state().last_opened_url, None, "no URL or external launcher is involved");
 }
 
+/// An embedded Go-To link to a parent or missing file opens no tab and notifies the user.
 #[test]
 fn an_embedded_gotoe_link_to_parent_or_missing_file_opens_no_tab() {
     let _gpu = gpu();

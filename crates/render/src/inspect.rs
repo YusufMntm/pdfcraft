@@ -1558,6 +1558,7 @@ impl<'a> Inspector<'a> {
         link_replies(&mut info.annotations);
     }
 
+    /// Parse a link annotation dictionary into a `Link` with its geometry and target.
     fn link(&self, page: usize, index: usize, d: &Dictionary, text_budget: &mut usize) -> Option<Link> {
         let rect = rect4(self.resolve(d.get(b"Rect").ok()?));
         let target = if let Ok(dest) = d.get(b"Dest") {
@@ -1588,6 +1589,7 @@ impl<'a> Inspector<'a> {
         Some(Link { page, index, rect, target })
     }
 
+    /// Parse a destination `/D` from an action dictionary (remote or embedded Go-To).
     fn action_destination(&self, action: &Dictionary) -> Option<RemoteDestination> {
         match action.get(b"D") {
             Err(_) => Some(RemoteDestination::Default),
@@ -1617,6 +1619,7 @@ impl<'a> Inspector<'a> {
         }
     }
 
+    /// Parse a remote Go-To action (`GoToR`, ISO 32000-2 §12.6.4.3).
     fn remote_go_to(&self, action: &Dictionary) -> Option<LinkTarget> {
         let file = self.action_file(action)?;
         let destination = self.action_destination(action)?;
