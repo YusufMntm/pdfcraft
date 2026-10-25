@@ -782,6 +782,10 @@ fn link_actions_fixture() -> Vec<u8> {
         );
         annots.get_mut(&pages[0]).unwrap().push(format!("{id} 0 R"));
     }
+    // A non-widget markup comment with an author /T, to verify non-field annotation targets in Hide arrays.
+    objs.insert(99, format!("<< /Type /Annot /Subtype /Text /T (CommentAuthor) /Rect [0 0 10 10] /P {} 0 R >>", pages[0]));
+    annots.get_mut(&pages[0]).unwrap().push("99 0 R".into());
+
     let mut n = 30;
     struct LinkBuilder<'a> {
         contents: &'a mut std::collections::HashMap<usize, String>,
@@ -805,6 +809,8 @@ fn link_actions_fixture() -> Vec<u8> {
         ("Named /Bogus: nothing should happen", "<< /S /Named /N /Bogus >>"),
         ("Hide secret by reference with default /H", "<< /S /Hide /T 20 0 R >>"),
         ("Show secret again (/H false in array)", "<< /S /Hide /T [20 0 R] /H false >>"),
+        ("Hide array with field name, annotation reference, and non-widget comment", "<< /S /Hide /T [(secret) 21 0 R 99 0 R] >>"),
+        ("Show array with field name and annotation reference", "<< /S /Hide /T [(secret) 21 0 R] /H false >>"),
         ("ResetForm empty include mode", "<< /S /ResetForm /Fields [(nonexistent)] /Flags 0 >>"),
         ("ResetForm f1 only", "<< /S /ResetForm /Fields [(f1)] /Flags 0 >>"),
         ("ResetForm all but f1 by reference (/Flags 1)", "<< /S /ResetForm /Fields [21 0 R] /Flags 1 >>"),
@@ -935,9 +941,35 @@ fn links_with_named_hide_reset_form_and_next_chain() {
         assert_eq!(f & 2, 0, "secret field is shown again");
     }
 
-    // 9. ResetForm with empty include mode: no fields are reset
-    // Initially f1 is "typed 1", f2 is "typed 2"
+    // 9. Hide array with field name (secret), widget reference (f1), and non-widget comment (99 0 R)
     click_link_page(&mut h, 0, 440.0);
+    h.run_steps(8);
+    {
+        let s = h.state();
+        let bytes = s.session.save_bytes(s.views[0].id).unwrap();
+        let doc = pdfcraft_cos::Document::open(bytes).unwrap();
+        let f_secret = doc.get(pdfcraft_cos::ObjRef::new(20, 0)).as_dict().and_then(|d| d.int(b"F")).unwrap_or(0);
+        let f_f1 = doc.get(pdfcraft_cos::ObjRef::new(21, 0)).as_dict().and_then(|d| d.int(b"F")).unwrap_or(0);
+        assert_eq!(f_secret & 2, 2, "secret field is hidden by name in mixed array");
+        assert_eq!(f_f1 & 2, 2, "f1 field is hidden by widget reference in mixed array");
+    }
+
+    // 10. Show array with field name and widget reference (/H false)
+    click_link_page(&mut h, 0, 400.0);
+    h.run_steps(8);
+    {
+        let s = h.state();
+        let bytes = s.session.save_bytes(s.views[0].id).unwrap();
+        let doc = pdfcraft_cos::Document::open(bytes).unwrap();
+        let f_secret = doc.get(pdfcraft_cos::ObjRef::new(20, 0)).as_dict().and_then(|d| d.int(b"F")).unwrap_or(0);
+        let f_f1 = doc.get(pdfcraft_cos::ObjRef::new(21, 0)).as_dict().and_then(|d| d.int(b"F")).unwrap_or(0);
+        assert_eq!(f_secret & 2, 0, "secret field is shown again by mixed array");
+        assert_eq!(f_f1 & 2, 0, "f1 field is shown again by mixed array");
+    }
+
+    // 11. ResetForm with empty include mode: no fields are reset
+    // Initially f1 is "typed 1", f2 is "typed 2"
+    click_link_page(&mut h, 0, 360.0);
     h.run_steps(8);
     {
         let s = h.state();
@@ -948,8 +980,8 @@ fn links_with_named_hide_reset_form_and_next_chain() {
         assert_eq!(f2, ["typed 2"], "f2 left untouched by empty include-mode reset");
     }
 
-    // 10. ResetForm f1 only (/Fields [(f1)] /Flags 0)
-    click_link_page(&mut h, 0, 400.0);
+    // 12. ResetForm f1 only (/Fields [(f1)] /Flags 0)
+    click_link_page(&mut h, 0, 320.0);
     h.run_steps(8);
     {
         let s = h.state();
@@ -965,8 +997,8 @@ fn links_with_named_hide_reset_form_and_next_chain() {
         .apply_edit(pdfcraft_engine::Edit::SetFieldValue { name: "f1".into(), value: pdfcraft_engine::FieldValue::Text("typed 1 again".into()) });
     h.run_steps(4);
 
-    // 11. ResetForm all but f1 by reference (/Fields [21 0 R] /Flags 1)
-    click_link_page(&mut h, 0, 360.0);
+    // 13. ResetForm all but f1 by reference (/Fields [21 0 R] /Flags 1)
+    click_link_page(&mut h, 0, 280.0);
     h.run_steps(8);
     {
         let s = h.state();
@@ -977,8 +1009,8 @@ fn links_with_named_hide_reset_form_and_next_chain() {
         assert_eq!(f2, ["two"], "f2 reset to its default");
     }
 
-    // 12. NextPage, then /Next GoTo page 4: goes to page 4
-    click_link_page(&mut h, 0, 320.0);
+    // 14. NextPage, then /Next GoTo page 4: goes to page 4
+    click_link_page(&mut h, 0, 240.0);
     h.run_steps(8);
     assert_eq!(h.state().views[0].current, 3, "chain finished on page 4");
 }

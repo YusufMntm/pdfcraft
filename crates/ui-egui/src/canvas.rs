@@ -4635,16 +4635,43 @@ fn link_target_label(target: &LinkTarget, info: &DocInfo) -> String {
     }
 }
 
-/// Create an edit to show or hide the specified form fields.
-fn hide_fields_edit(session: &pdfcraft_engine::Session, id: pdfcraft_engine::DocId, fields: &[String], hide: bool) -> Option<pdfcraft_engine::Edit> {
-    let listed = |n: &String| fields.iter().any(|f| n == f || n.starts_with(&format!("{f}.")));
-    // `display.hidden` 1, `display.visible` 0, as a script setting `field.display` would.
-    let changes: Vec<pdfcraft_engine::FieldChange> = session
-        .get(id)
-        .map(|d| d.form.iter().filter(|f| listed(&f.name)).map(|f| f.name.clone()).collect::<Vec<_>>())
-        .unwrap_or_default()
-        .into_iter()
-        .map(|name| pdfcraft_engine::FieldChange { name, value: None, read_only: None, required: None, display: Some(if hide { 1 } else { 0 }) })
+/// Create an edit to show or hide the specified form fields or annotation targets.
+fn hide_targets_edit(
+    session: &pdfcraft_engine::Session,
+    id: pdfcraft_engine::DocId,
+    targets: &[pdfcraft_render::HideTarget],
+    hide: bool,
+) -> Option<pdfcraft_engine::Edit> {
+    use pdfcraft_render::HideTarget;
+    let doc = session.get(id)?;
+    let mut matched_names = std::collections::HashSet::new();
+    for t in targets {
+        match t {
+            HideTarget::Field(name) => {
+                matched_names.insert(name.clone());
+            }
+            HideTarget::Annotation(obj_id) => {
+                let target_ref = pdfcraft_cos::ObjRef::new(obj_id.0, obj_id.1);
+                for f in doc.form.iter() {
+                    if f.obj == target_ref || f.widgets.iter().any(|w| w.obj == target_ref) {
+                        matched_names.insert(f.name.clone());
+                    }
+                }
+            }
+        }
+    }
+    let is_affected = |f_name: &str| matched_names.iter().any(|m| f_name == m || f_name.starts_with(&format!("{m}.")));
+    let changes: Vec<pdfcraft_engine::FieldChange> = doc
+        .form
+        .iter()
+        .filter(|f| is_affected(&f.name))
+        .map(|f| pdfcraft_engine::FieldChange {
+            name: f.name.clone(),
+            value: None,
+            read_only: None,
+            required: None,
+            display: Some(if hide { 1 } else { 0 }),
+        })
         .collect();
     if !changes.is_empty() {
         let label = if hide { "Hide a field" } else { "Show a field" };
@@ -4652,6 +4679,12 @@ fn hide_fields_edit(session: &pdfcraft_engine::Session, id: pdfcraft_engine::Doc
     } else {
         None
     }
+}
+
+/// Create an edit to show or hide the specified form fields.
+fn hide_fields_edit(session: &pdfcraft_engine::Session, id: pdfcraft_engine::DocId, fields: &[String], hide: bool) -> Option<pdfcraft_engine::Edit> {
+    let targets: Vec<pdfcraft_render::HideTarget> = fields.iter().cloned().map(pdfcraft_render::HideTarget::Field).collect();
+    hide_targets_edit(session, id, &targets, hide)
 }
 
 /// Create an edit to reset form fields to their defaults.
@@ -4701,9 +4734,9 @@ fn run_link_target(app: &mut PdfCraftApp, index: usize, target: &LinkTarget, pen
             "LastPage" => app.views[index].go_to_page(pages.saturating_sub(1)),
             _ => {} // ISO 32000-2 Table 215: if the viewer does not recognise the name, it shall take no action.
         },
-        LinkTarget::Hide { fields, hide } => {
+        LinkTarget::Hide { targets, hide } => {
             let doc_id = app.views[index].id;
-            if let Some(edit) = hide_fields_edit(&app.session, doc_id, fields, *hide) {
+            if let Some(edit) = hide_targets_edit(&app.session, doc_id, targets, *hide) {
                 pending_edits.push(edit);
             }
         }

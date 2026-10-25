@@ -52,6 +52,8 @@ const MAX_LINK_ATTACHMENT_TEXT_BYTES: usize = 16 << 20;
 
 /// Maximum number of chained actions to inspect per link (ISO 32000-2 §12.6.2, Table 196).
 const MAX_ACTION_CHAIN: usize = 64;
+/// Maximum number of field or annotation targets parsed from a single Hide or ResetForm action.
+const MAX_ACTION_TARGETS: usize = 256;
 
 /// Whether a link target (or any action chained within it) is a JavaScript action.
 fn has_javascript_target(target: &LinkTarget) -> bool {
@@ -329,6 +331,15 @@ pub struct Link {
     pub target: LinkTarget,
 }
 
+/// A target of a Hide action (ISO 32000-2 §12.6.4.11, Table 214): a field by name, or an annotation by object identity.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HideTarget {
+    /// A form field identified by its fully qualified name.
+    Field(String),
+    /// An annotation identified by its object number and generation.
+    Annotation((u32, u16)),
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum LinkTarget {
     /// A destination in this document: the 0-based page and where on it the view goes.
@@ -345,8 +356,8 @@ pub enum LinkTarget {
     RemoteGoTo { launch: bool, file: String, destination: RemoteDestination, new_window: Option<bool> },
     /// A named action (ISO 32000-2 §12.6.4.12, Table 215): NextPage, PrevPage, FirstPage, LastPage.
     Named(String),
-    /// A hide action (ISO 32000-2 §12.6.4.11, Table 214): show or hide the named fields.
-    Hide { fields: Vec<String>, hide: bool },
+    /// A hide action (ISO 32000-2 §12.6.4.11, Table 214): show or hide the target fields or annotations.
+    Hide { targets: Vec<HideTarget>, hide: bool },
     /// A reset-form action (ISO 32000-2 §12.7.6.3, Tables 241-242): reset the listed fields, or all except them.
     ResetForm { fields: Vec<String>, exclude: bool },
     /// A sequence of actions chained via `/Next` (ISO 32000-2 §12.6.2, Table 196).
@@ -1559,11 +1570,11 @@ impl<'a> Inspector<'a> {
             let a_obj = d.get(b"A").ok()?;
             let a = self.dict(a_obj)?;
             let mut targets = Vec::new();
-            let mut seen = HashSet::new();
+            let mut active_stack = HashSet::new();
             if let Object::Reference(id) = a_obj {
-                seen.insert(*id);
+                active_stack.insert(*id);
             }
-            self.collect_actions(a, &mut targets, &mut seen, text_budget, 0);
+            self.collect_actions(a, &mut targets, &mut active_stack, text_budget, 0);
             match targets.len() {
                 0 => return None,
                 1 => targets.swap_remove(0),
@@ -1575,7 +1586,14 @@ impl<'a> Inspector<'a> {
 
     /// Collect the action in `a` and any actions chained after it via `/Next` (§12.6.2, Table 196),
     /// bounded to prevent cycles.
-    fn collect_actions(&self, a: &'a Dictionary, targets: &mut Vec<LinkTarget>, seen: &mut HashSet<ObjectId>, text_budget: &mut usize, depth: usize) {
+    fn collect_actions(
+        &self,
+        a: &'a Dictionary,
+        targets: &mut Vec<LinkTarget>,
+        active_stack: &mut HashSet<ObjectId>,
+        text_budget: &mut usize,
+        depth: usize,
+    ) {
         if depth >= MAX_ACTION_CHAIN || targets.len() >= MAX_ACTION_CHAIN {
             return;
         }
@@ -1583,31 +1601,60 @@ impl<'a> Inspector<'a> {
             targets.push(target);
         }
         let Ok(next) = a.get(b"Next") else { return };
-        if let Object::Reference(id) = next
-            && !seen.insert(*id)
-        {
-            return;
-        }
-        match self.resolve(next) {
-            Object::Dictionary(d) => {
-                self.collect_actions(d, targets, seen, text_budget, depth + 1);
+        if let Object::Reference(id) = next {
+            if !active_stack.insert(*id) {
+                return;
             }
-            Object::Array(items) => {
-                for item in items {
-                    if targets.len() >= MAX_ACTION_CHAIN {
-                        break;
-                    }
-                    if let Object::Reference(id) = item
-                        && !seen.insert(*id)
-                    {
-                        continue;
-                    }
-                    if let Some(d) = self.dict(item) {
-                        self.collect_actions(d, targets, seen, text_budget, depth + 1);
+            match self.resolve(next) {
+                Object::Dictionary(d) => {
+                    self.collect_actions(d, targets, active_stack, text_budget, depth + 1);
+                }
+                Object::Array(items) => {
+                    for item in items.iter().take(MAX_ACTION_CHAIN) {
+                        if targets.len() >= MAX_ACTION_CHAIN {
+                            break;
+                        }
+                        if let Object::Reference(child_id) = item {
+                            if !active_stack.insert(*child_id) {
+                                continue;
+                            }
+                            if let Some(d) = self.dict(item) {
+                                self.collect_actions(d, targets, active_stack, text_budget, depth + 1);
+                            }
+                            active_stack.remove(child_id);
+                        } else if let Some(d) = self.dict(item) {
+                            self.collect_actions(d, targets, active_stack, text_budget, depth + 1);
+                        }
                     }
                 }
+                _ => {}
             }
-            _ => {}
+            active_stack.remove(id);
+        } else {
+            match self.resolve(next) {
+                Object::Dictionary(d) => {
+                    self.collect_actions(d, targets, active_stack, text_budget, depth + 1);
+                }
+                Object::Array(items) => {
+                    for item in items.iter().take(MAX_ACTION_CHAIN) {
+                        if targets.len() >= MAX_ACTION_CHAIN {
+                            break;
+                        }
+                        if let Object::Reference(child_id) = item {
+                            if !active_stack.insert(*child_id) {
+                                continue;
+                            }
+                            if let Some(d) = self.dict(item) {
+                                self.collect_actions(d, targets, active_stack, text_budget, depth + 1);
+                            }
+                            active_stack.remove(child_id);
+                        } else if let Some(d) = self.dict(item) {
+                            self.collect_actions(d, targets, active_stack, text_budget, depth + 1);
+                        }
+                    }
+                }
+                _ => {}
+            }
         }
     }
 
@@ -1633,14 +1680,17 @@ impl<'a> Inspector<'a> {
                 Some(LinkTarget::Named(n))
             }
             Some("Hide") => {
-                let fields = self.hide_targets(a);
+                let targets = self.hide_targets(a, text_budget);
                 let hide = !matches!(a.get(b"H").ok().map(|h| self.resolve(h)), Some(Object::Boolean(false)));
-                Some(LinkTarget::Hide { fields, hide })
+                Some(LinkTarget::Hide { targets, hide })
             }
             Some("ResetForm") => {
-                let fields = self.reset_form_targets(a);
+                let (fields, budget_exhausted) = self.reset_form_targets(a, text_budget);
                 let exclude = a.get(b"Flags").ok().and_then(|f| self.resolve(f).as_i64().ok()).unwrap_or(0) & 1 != 0;
-                if !exclude && a.get(b"Fields").is_ok() && fields.is_empty() {
+                // In include mode (Flags bit 1 clear), an explicit /Fields entry must resolve at least one
+                // field target and must not have exhausted the decode budget. Otherwise, omitting or truncating
+                // fields would invert semantics into resetting the entire form.
+                if !exclude && a.get(b"Fields").is_ok() && (fields.is_empty() || budget_exhausted) {
                     return None;
                 }
                 Some(LinkTarget::ResetForm { fields, exclude })
@@ -1650,41 +1700,88 @@ impl<'a> Inspector<'a> {
         }
     }
 
-    /// The target field names of a Hide action (§12.6.4.11, Table 214).
-    fn hide_targets(&self, a: &Dictionary) -> Vec<String> {
+    /// The targets of a Hide action (§12.6.4.11, Table 214).
+    fn hide_targets(&self, a: &Dictionary, text_budget: &mut usize) -> Vec<HideTarget> {
         let Ok(t) = a.get(b"T") else { return Vec::new() };
+        let mut targets = Vec::new();
         match self.resolve(t) {
-            Object::Array(items) => items.iter().filter_map(|item| self.field_target_name(item)).collect(),
-            _ => self.field_target_name(t).into_iter().collect(),
+            Object::Array(items) => {
+                for item in items.iter().take(MAX_ACTION_TARGETS) {
+                    if let Some(target) = self.hide_target(item, text_budget) {
+                        targets.push(target);
+                    }
+                }
+            }
+            _ => {
+                if let Some(target) = self.hide_target(t, text_budget) {
+                    targets.push(target);
+                }
+            }
+        }
+        targets
+    }
+
+    /// Resolves an action target object (string, name, or indirect reference) to a [`HideTarget`].
+    fn hide_target(&self, item: &'a Object, text_budget: &mut usize) -> Option<HideTarget> {
+        match item {
+            Object::Reference(id) => match self.resolve(item) {
+                Object::String(bytes, _) => spend(bytes, text_budget, text_string).map(HideTarget::Field),
+                Object::Name(bytes) => spend(bytes, text_budget, |b| String::from_utf8_lossy(b).into_owned()).map(HideTarget::Field),
+                _ => Some(HideTarget::Annotation(*id)),
+            },
+            _ => match self.resolve(item) {
+                Object::String(bytes, _) => spend(bytes, text_budget, text_string).map(HideTarget::Field),
+                Object::Name(bytes) => spend(bytes, text_budget, |b| String::from_utf8_lossy(b).into_owned()).map(HideTarget::Field),
+                _ => None,
+            },
         }
     }
 
-    /// The field names listed in a ResetForm action (§12.7.6.3, Table 241).
-    fn reset_form_targets(&self, a: &Dictionary) -> Vec<String> {
-        let Ok(f) = a.get(b"Fields") else { return Vec::new() };
+    /// The field names listed in a ResetForm action (§12.7.6.3, Table 241), and whether the decode budget ran out.
+    fn reset_form_targets(&self, a: &Dictionary, text_budget: &mut usize) -> (Vec<String>, bool) {
+        let Ok(f) = a.get(b"Fields") else { return (Vec::new(), false) };
+        let mut fields = Vec::new();
+        let mut budget_exhausted = false;
         match self.resolve(f) {
-            Object::Array(items) => items.iter().filter_map(|item| self.field_target_name(item)).collect(),
-            _ => self.field_target_name(f).into_iter().collect(),
+            Object::Array(items) => {
+                for item in items.iter().take(MAX_ACTION_TARGETS) {
+                    if let Some(field) = self.field_target_name(item, text_budget) {
+                        fields.push(field);
+                    } else if *text_budget == 0 {
+                        budget_exhausted = true;
+                        break;
+                    }
+                }
+            }
+            _ => {
+                if let Some(field) = self.field_target_name(f, text_budget) {
+                    fields.push(field);
+                } else if *text_budget == 0 {
+                    budget_exhausted = true;
+                }
+            }
         }
+        (fields, budget_exhausted)
     }
 
     /// Resolves an action target object (string, name, or indirect reference) to a field name.
-    fn field_target_name(&self, item: &'a Object) -> Option<String> {
+    fn field_target_name(&self, item: &'a Object, text_budget: &mut usize) -> Option<String> {
         match self.resolve(item) {
-            Object::String(bytes, _) => Some(text_string(bytes)),
-            Object::Name(bytes) => Some(String::from_utf8_lossy(bytes).into_owned()),
+            Object::String(bytes, _) => spend(bytes, text_budget, text_string),
+            Object::Name(bytes) => spend(bytes, text_budget, |b| String::from_utf8_lossy(b).into_owned()),
             Object::Dictionary(d) => {
                 if let Object::Reference(id) = item {
-                    self.field_qualified_name(*id)
+                    self.field_qualified_name(*id, text_budget)
                 } else if d.get(b"FT").is_ok() || self.name(d, b"Subtype").as_deref() == Some("Widget") {
-                    self.text(d, b"T")
+                    let Ok(t) = d.get(b"T") else { return None };
+                    self.resolve(t).as_str().ok().and_then(|bytes| spend(bytes, text_budget, text_string))
                 } else {
                     None
                 }
             }
             _ => {
                 if let Object::Reference(id) = item {
-                    self.field_qualified_name(*id)
+                    self.field_qualified_name(*id, text_budget)
                 } else {
                     None
                 }
@@ -1694,7 +1791,7 @@ impl<'a> Inspector<'a> {
 
     /// The fully qualified name of the field that `id` belongs to, from the partial names (`/T`)
     /// up its `/Parent` chain.
-    fn field_qualified_name(&self, id: ObjectId) -> Option<String> {
+    fn field_qualified_name(&self, id: ObjectId, text_budget: &mut usize) -> Option<String> {
         let mut parts = Vec::new();
         let mut cur = id;
         let mut seen = HashSet::new();
@@ -1702,8 +1799,11 @@ impl<'a> Inspector<'a> {
         while seen.insert(cur) && parts.len() < 32 {
             let Ok(d) = self.doc.get_dictionary(cur) else { break };
             is_field |= d.get(b"FT").is_ok() || self.name(d, b"Subtype").as_deref() == Some("Widget");
-            if let Some(t) = self.text(d, b"T") {
-                parts.push(t);
+            if let Ok(t) = d.get(b"T")
+                && let Ok(bytes) = self.resolve(t).as_str()
+                && let Some(part) = spend(bytes, text_budget, text_string)
+            {
+                parts.push(part);
             }
             match d.get(b"Parent") {
                 Ok(Object::Reference(parent_id)) => cur = *parent_id,
@@ -3615,34 +3715,47 @@ trailer << /Root 1 0 R >>
             [
                 LinkTarget::Named("NextPage".into()),
                 LinkTarget::Named("Bogus".into()),
-                LinkTarget::Hide { fields: vec!["secret".into()], hide: true },
-                LinkTarget::Hide { fields: vec!["secret".into()], hide: false },
+                LinkTarget::Hide { targets: vec![HideTarget::Field("secret".into())], hide: true },
+                LinkTarget::Hide { targets: vec![HideTarget::Annotation((4, 0))], hide: false },
                 LinkTarget::ResetForm { fields: vec!["f1".into()], exclude: false },
                 LinkTarget::ResetForm { fields: vec!["f1".into()], exclude: true },
-                LinkTarget::Hide { fields: vec!["secret".into(), "parent.child".into()], hide: true },
-                LinkTarget::Hide { fields: Vec::new(), hide: true },
+                LinkTarget::Hide { targets: vec![HideTarget::Annotation((4, 0)), HideTarget::Annotation((8, 0))], hide: true },
+                LinkTarget::Hide { targets: vec![HideTarget::Annotation((9, 0))], hide: true },
                 // 18 is ResetForm with include-mode but only non-field target 9 0 R, so it's dropped (None)
                 LinkTarget::ResetForm { fields: Vec::new(), exclude: false },
             ]
         );
     }
 
-    /// Links with /Next chains execute actions in sequence, and cycles are bounded without hanging.
+    /// Links with /Next chains execute actions in sequence, cycles are bounded without hanging,
+    /// and repeated non-cyclic action references in chains are preserved in order.
     #[test]
     fn links_read_next_action_chains_and_guard_against_cycles() {
         let pdf = "%PDF-1.7\n\
             1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n\
             2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 400] >> endobj\n\
-            3 0 obj << /Type /Page /Parent 2 0 R /Annots [10 0 R 20 0 R] >> endobj\n\
+            3 0 obj << /Type /Page /Parent 2 0 R /Annots [10 0 R 20 0 R 30 0 R] >> endobj\n\
             10 0 obj << /Type /Annot /Subtype /Link /Rect [0 0 10 10] /A << /S /Named /N /NextPage /Next << /S /GoTo /D [3 0 R /Fit] >> >> >> endobj\n\
             20 0 obj << /Type /Annot /Subtype /Link /Rect [0 10 10 20] /A 21 0 R >> endobj\n\
             21 0 obj << /S /Named /N /FirstPage /Next 22 0 R >> endobj\n\
             22 0 obj << /S /Named /N /LastPage /Next 21 0 R >> endobj\n\
+            30 0 obj << /Type /Annot /Subtype /Link /Rect [0 20 10 30] /A << /S /Named /N /NextPage /Next [21 0 R 21 0 R] >> >> endobj\n\
             trailer << /Root 1 0 R >>\n%%EOF";
         let info = inspect(Arc::new(pdf.as_bytes().to_vec()), None).expect("opens");
         assert_eq!(info.links[0].target, LinkTarget::Sequence(vec![LinkTarget::Named("NextPage".into()), LinkTarget::Page(0, DestView::Fit)]));
         let LinkTarget::Sequence(chain) = &info.links[1].target else { panic!("expected sequence") };
         assert_eq!(chain, &[LinkTarget::Named("FirstPage".into()), LinkTarget::Named("LastPage".into())]);
+        let LinkTarget::Sequence(repeated) = &info.links[2].target else { panic!("expected sequence") };
+        assert_eq!(
+            repeated,
+            &[
+                LinkTarget::Named("NextPage".into()),
+                LinkTarget::Named("FirstPage".into()),
+                LinkTarget::Named("LastPage".into()),
+                LinkTarget::Named("FirstPage".into()),
+                LinkTarget::Named("LastPage".into()),
+            ]
+        );
     }
 
     /// #4168: a Launch action naming a `.pdf` file is read as the link to that file it amounts

@@ -2645,7 +2645,27 @@ fn target_json(i: &pdfcraft_render::DocInfo, target: &pdfcraft_render::LinkTarge
             "new_window": new_window,
         }),
         pdfcraft_render::LinkTarget::Named(n) => json!({ "named": n }),
-        pdfcraft_render::LinkTarget::Hide { fields, hide } => json!({ "hide": fields, "hidden": hide }),
+        pdfcraft_render::LinkTarget::Hide { targets, hide } => {
+            let fields: Vec<&str> = targets
+                .iter()
+                .filter_map(|t| match t {
+                    pdfcraft_render::HideTarget::Field(f) => Some(f.as_str()),
+                    pdfcraft_render::HideTarget::Annotation(_) => None,
+                })
+                .collect();
+            let annotations: Vec<String> = targets
+                .iter()
+                .filter_map(|t| match t {
+                    pdfcraft_render::HideTarget::Annotation(id) => Some(format!("{}:{}", id.0, id.1)),
+                    pdfcraft_render::HideTarget::Field(_) => None,
+                })
+                .collect();
+            if annotations.is_empty() {
+                json!({ "hide": fields, "hidden": hide })
+            } else {
+                json!({ "hide": fields, "annotations": annotations, "hidden": hide })
+            }
+        }
         pdfcraft_render::LinkTarget::ResetForm { fields, exclude } => json!({ "reset": fields, "exclude": exclude }),
         pdfcraft_render::LinkTarget::Sequence(seq) => json!({
             "sequence": seq.iter().map(|t| target_json(i, t)).collect::<Vec<_>>(),
