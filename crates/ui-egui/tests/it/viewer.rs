@@ -2301,6 +2301,16 @@ fn rulers_toggle_and_track_cursor_position() {
     h.key_press_modifiers(Modifiers::COMMAND, Key::R);
     h.run_steps(2);
     assert!(h.state().show_rulers, "Ctrl+R toggles rulers back on");
+
+    // Verify rulers visibility in ui.state both with and without an active document.
+    let state = h.state().ui_state();
+    assert_eq!(state["rulers"], true, "rulers state exposed at top-level");
+    assert_eq!(state["active"]["rulers"], true, "rulers state exposed in active");
+
+    h.state_mut().active = None;
+    let home_state = h.state().ui_state();
+    assert!(home_state["active"].is_null(), "no active document on home");
+    assert_eq!(home_state["rulers"], true, "rulers state readable at top-level on home");
 }
 
 /// End-to-end test for canvas rulers: moves cursor across the canvas, verifies ruler positions,

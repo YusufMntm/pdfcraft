@@ -2304,6 +2304,13 @@ impl PdfCraftApp {
         client
     }
 
+    /// Return the full JSON state of the application for UI automation and tests.
+    #[must_use]
+    pub fn ui_state(&self) -> serde_json::Value {
+        use control::Host;
+        self.state()
+    }
+
     /// Open a web link in the system browser (a new tab on the web). Only for PdfCraft's own
     /// links; an address that came from a document goes through [`Self::request_document_url`].
     pub fn open_url(&mut self, url: &str) {
