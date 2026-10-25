@@ -2326,6 +2326,32 @@ fn page_canvas_context_menu_has_acrobat_parity_options_and_actions() {
     assert_eq!(h.state().quick_tool, pdfcraft_ui_egui::QuickTool::AddText, "add text tool selected");
 }
 
+#[test]
+fn page_canvas_context_menu_shows_flatten_comments_when_annotations_exist() {
+    let mut h = harness();
+    h.run_steps(4);
+    let i = h.state().active.unwrap();
+    let at = h.state().views[i].page_screen_rect(0).expect("on screen").center();
+    let shape = pdfcraft_engine::Shape::Ink { strokes: vec![vec![[10.0, 10.0], [20.0, 20.0]]] };
+    let stroke = pdfcraft_engine::Edit::AddAnnotation(pdfcraft_engine::NewAnnotation {
+        page: 0,
+        style: pdfcraft_engine::Style::default_for(&shape),
+        shape,
+        contents: String::new(),
+        author: "tester".into(),
+    });
+    h.state_mut().apply_edit(stroke);
+    h.run_steps(2);
+
+    h.hover_at(at);
+    h.run_steps(1);
+    h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Secondary, pressed: true, modifiers: Default::default() });
+    h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Secondary, pressed: false, modifiers: Default::default() });
+    h.run_steps(2);
+
+    assert!(h.query_all_by_label("Flatten comments").count() >= 1, "Flatten comments should appear in page context menu when annotations exist");
+}
+
 /// When the interface language is Turkish, the context menu labels match Acrobat Turkish
 /// localization (§5 all options asserted).
 #[test]

@@ -4746,7 +4746,7 @@ fn page_context_menu(
     let selected_text = view.selected_text().is_some_and(|t| !t.is_empty());
     let mut image_hit = None;
     if let Some((page, at)) = view.comments.context_at {
-        let key = egui::Id::new(("copy-image-under-menu", view.id.0, doc.edit_generation()));
+        let key = egui::Id::unique(("copy-image-under-menu", view.id.0, doc.edit_generation()));
         let cached = ui.data(|d| d.get_temp::<(usize, [f64; 2], Option<usize>)>(key)).filter(|c| c.0 == page && c.1 == at);
         let hit = match cached {
             Some(c) => c.2,
@@ -4802,6 +4802,14 @@ fn page_context_menu(
     if ui.button(tl!("Comments panel")).clicked() {
         action = Some(comments::CanvasAction::OpenComments);
         ui.close();
+    }
+    if !doc.info.annotations.is_empty() {
+        let resp = ui.add_enabled(can_modify, egui::Button::new(tl!("Flatten comments")));
+        if resp.clicked() {
+            view.comments.selected = None;
+            action = Some(comments::CanvasAction::Edit(Box::new(Edit::Flatten { comments: true, fields: false })));
+            ui.close();
+        }
     }
     ui.separator();
     if ui.button(tl!("Find tools and commands…")).clicked() {
