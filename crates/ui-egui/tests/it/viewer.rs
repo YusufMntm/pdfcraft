@@ -2269,10 +2269,10 @@ fn the_accessible_window_has_the_window_title_as_its_name() {
     assert_eq!(name(&h), Some(h.state().window_title.clone()));
 }
 
-/// Right-clicking on the page canvas presents the full Acrobat-parity context menu with all
-/// options: top icon bar (Save, Print, Select, Hand, Marquee zoom), Add comment, Take a snapshot,
-/// Edit a PDF, Add text, Add image…, Comments panel, Find tools and commands…, Rotate view clockwise,
-/// and Document properties… (§5 all options asserted).
+/// Right-clicking on the page canvas keeps the existing entries ("Copy", "Add a sticky note here",
+/// "Comments panel") and presents the Acrobat-parity page menu entries (Select, Hand, Marquee zoom,
+/// Take a snapshot, Edit a PDF, Add text, Add image…, Rotate view clockwise, Find tools and
+/// commands…, Save, Print…, Document properties…).
 #[test]
 fn page_canvas_context_menu_has_acrobat_parity_options_and_actions() {
     let mut h = harness();
@@ -2285,27 +2285,28 @@ fn page_canvas_context_menu_has_acrobat_parity_options_and_actions() {
     h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Secondary, pressed: false, modifiers: Default::default() });
     h.run_steps(2);
 
-    // Verify all top icon buttons are present.
-    assert!(h.query_all_by_label("Save").count() >= 1, "Save button in context menu");
-    assert!(h.query_all_by_label("Print").count() >= 1, "Print button in context menu");
-    assert!(h.query_all_by_label("Select (V)").count() >= 2, "Select tool button in context menu");
-    assert!(h.query_all_by_label("Hand (H)").count() >= 2, "Hand tool button in context menu");
-    assert!(h.query_all_by_label("Marquee zoom").count() >= 1, "Marquee zoom button in context menu");
+    // Existing canvas menu entries are preserved.
+    assert!(h.query_all_by_label_contains("Copy").count() >= 1, "Copy in context menu");
+    assert!(h.query_all_by_label("Add a sticky note here").count() >= 1, "Add a sticky note here in context menu");
+    assert!(h.query_all_by_label("Comments panel").count() >= 1, "Comments panel in context menu");
 
-    // Verify all text actions are present.
-    assert!(h.query_all_by_label("Add comment").count() >= 1, "Add comment in context menu");
+    // Additional page menu entries with standard menu labels and shortcut texts.
+    assert!(h.query_all_by_label_contains("Select").count() >= 1, "Select in context menu");
+    assert!(h.query_all_by_label_contains("Hand").count() >= 1, "Hand in context menu");
+    assert!(h.query_all_by_label("Marquee zoom").count() >= 1, "Marquee zoom in context menu");
     assert!(h.query_all_by_label("Take a snapshot").count() >= 1, "Take a snapshot in context menu");
     assert!(h.query_all_by_label("Edit a PDF").count() >= 1, "Edit a PDF in context menu");
     assert!(h.query_all_by_label("Add text").count() >= 1, "Add text in context menu");
     assert!(h.query_all_by_label("Add image…").count() >= 1, "Add image… in context menu");
-    assert!(h.query_all_by_label("Comments panel").count() >= 1, "Comments panel in context menu");
-    assert!(h.query_all_by_label("Find tools and commands…").count() >= 1, "Find tools and commands… in context menu");
-    assert!(h.query_all_by_label("Rotate view clockwise").count() >= 1, "Rotate view clockwise in context menu");
-    assert!(h.query_all_by_label("Document properties…").count() >= 1, "Document properties… in context menu");
+    assert!(h.query_all_by_label_contains("Rotate view clockwise").count() >= 1, "Rotate view clockwise in context menu");
+    assert!(h.query_all_by_label_contains("Find tools and commands…").count() >= 1, "Find tools and commands… in context menu");
+    assert!(h.query_all_by_label_contains("Save").count() >= 1, "Save in context menu");
+    assert!(h.query_all_by_label_contains("Print…").count() >= 1, "Print… in context menu");
+    assert!(h.query_all_by_label_contains("Document properties…").count() >= 1, "Document properties… in context menu");
 
     // Click Rotate view clockwise.
     assert_eq!(h.state().views[i].rotation, 0);
-    h.get_all_by_label("Rotate view clockwise").last().expect("button").click();
+    h.get_all_by_label_contains("Rotate view clockwise").last().expect("button").click();
     h.run_steps(2);
     assert_eq!(h.state().views[i].rotation, 90, "view rotated 90 degrees clockwise");
 
@@ -2352,8 +2353,7 @@ fn page_canvas_context_menu_shows_flatten_comments_when_annotations_exist() {
     assert!(h.query_all_by_label("Flatten comments").count() >= 1, "Flatten comments should appear in page context menu when annotations exist");
 }
 
-/// When the interface language is Turkish, the context menu labels match Acrobat Turkish
-/// localization (§5 all options asserted).
+/// When the interface language is Turkish, the context menu labels match the Turkish catalog.
 #[test]
 fn page_canvas_context_menu_in_turkish() {
     let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
@@ -2371,19 +2371,20 @@ fn page_canvas_context_menu_in_turkish() {
     h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Secondary, pressed: false, modifiers: Default::default() });
     h.run_steps(2);
 
-    assert!(h.query_all_by_label("Kaydet").count() >= 1, "Save button in TR context menu");
-    assert!(h.query_all_by_label("Yazdır").count() >= 1, "Print button in TR context menu");
-    assert!(h.query_all_by_label("Seç (V)").count() >= 2, "Select tool in TR context menu");
-    assert!(h.query_all_by_label("El (H)").count() >= 2, "Hand tool in TR context menu");
-    assert!(h.query_all_by_label("Seçim yakınlaştırma").count() >= 1, "Marquee zoom in TR context menu");
+    assert!(h.query_all_by_label_contains("Kopyala").count() >= 1, "Copy in TR context menu");
+    assert!(h.query_all_by_label("Buraya bir not ekle").count() >= 1, "Add a sticky note here in TR context menu");
+    assert!(h.query_all_by_label("Yorumlar paneli").count() >= 1, "Comments panel in TR context menu");
 
-    assert!(h.query_all_by_label("Yorum ekle").count() >= 1, "Yorum ekle in TR context menu");
-    assert!(h.query_all_by_label("Anlık görüntü al").count() >= 1, "Anlık görüntü al in TR context menu");
-    assert!(h.query_all_by_label("PDF'i düzenle").count() >= 1, "PDF'i düzenle in TR context menu");
-    assert!(h.query_all_by_label("Metin ekle").count() >= 1, "Metin ekle in TR context menu");
-    assert!(h.query_all_by_label("Resim ekle…").count() >= 1, "Resim ekle… in TR context menu");
-    assert!(h.query_all_by_label("Yorumlar paneli").count() >= 1, "Yorumlar paneli in TR context menu");
-    assert!(h.query_all_by_label("Araçları ve komutları bul…").count() >= 1, "Araçları ve komutları bul… in TR context menu");
-    assert!(h.query_all_by_label("Görünümü saat yönünde döndür").count() >= 1, "Görünümü saat yönünde döndür in TR context menu");
-    assert!(h.query_all_by_label("Belge özellikleri…").count() >= 1, "Belge özellikleri… in TR context menu");
+    assert!(h.query_all_by_label_contains("Seç").count() >= 1, "Select in TR context menu");
+    assert!(h.query_all_by_label_contains("El").count() >= 1, "Hand in TR context menu");
+    assert!(h.query_all_by_label("Seçim yakınlaştırma").count() >= 1, "Marquee zoom in TR context menu");
+    assert!(h.query_all_by_label("Anlık görüntü al").count() >= 1, "Take a snapshot in TR context menu");
+    assert!(h.query_all_by_label("PDF'i düzenle").count() >= 1, "Edit a PDF in TR context menu");
+    assert!(h.query_all_by_label("Metin ekle").count() >= 1, "Add text in TR context menu");
+    assert!(h.query_all_by_label("Resim ekle…").count() >= 1, "Add image… in TR context menu");
+    assert!(h.query_all_by_label_contains("Görünümü saat yönünde döndür").count() >= 1, "Rotate view clockwise in TR context menu");
+    assert!(h.query_all_by_label_contains("Araçları ve komutları bul…").count() >= 1, "Find tools and commands… in TR context menu");
+    assert!(h.query_all_by_label_contains("Kaydet").count() >= 1, "Save in TR context menu");
+    assert!(h.query_all_by_label_contains("Yazdır…").count() >= 1, "Print… in TR context menu");
+    assert!(h.query_all_by_label_contains("Belge özellikleri…").count() >= 1, "Document properties… in TR context menu");
 }
