@@ -813,7 +813,7 @@ pub(crate) fn resized(r: Rect, (hx, hy): (i8, i8), d: egui::Vec2, aspect_ratio: 
 pub(crate) fn page_input(ui: &egui::Ui, resp: &egui::Response, cx: &PageCx<'_>, view: &mut DocView) -> bool {
     let (pointer, origin) = (cx.ptr.pos, cx.ptr.origin);
     let page_rect = cx.xf.rect;
-    let pressed_here = origin.is_some_and(|o| page_rect.contains(o));
+    let pressed_here = origin.is_some_and(|o| page_rect.contains(o) || on_handle(cx, view, o, |_| true));
     let over_page = pointer.is_some_and(|p| page_rect.contains(p));
     let fill_grab = fill_grabs(cx, view);
     let draw_grab = draw_grabs(cx, view);
@@ -1111,7 +1111,7 @@ pub(crate) fn draw_grabs(cx: &PageCx<'_>, view: &DocView) -> bool {
     if cv.gesture.is_some() {
         return false;
     }
-    press_point(cx).is_some_and(|p| on_handle(cx, view, p, |_| true))
+    press_point(cx, view).is_some_and(|p| on_handle(cx, view, p, |_| true))
 }
 
 /// Whether the press (or, with no button down, the pointer) is on a `pick` comment or on the
@@ -1124,14 +1124,15 @@ fn grabs(cx: &PageCx<'_>, view: &DocView, pick: impl Fn(&Annotation) -> bool) ->
     {
         return true;
     }
-    let Some(p) = press_point(cx) else { return false };
-    on_handle(cx, view, p, &pick) || cx.hit(p).is_some_and(pick)
+    let Some(p) = press_point(cx, view) else { return false };
+    on_handle(cx, view, p, &pick) || (cx.xf.rect.contains(p) && cx.hit(p).is_some_and(pick))
 }
 
 /// Where a gesture on this page is decided: the press while the button is down, otherwise the
-/// pointer (egui clears the press origin on release). `None` off the page.
-fn press_point(cx: &PageCx<'_>) -> Option<Pos2> {
-    (if cx.ptr.any_down { cx.ptr.origin } else { cx.ptr.pos }).filter(|p| cx.xf.rect.contains(*p))
+/// pointer (egui clears the press origin on release). An off-page point is allowed only when it
+/// lands on a handle of this page's selected comment (#4825).
+fn press_point(cx: &PageCx<'_>, view: &DocView) -> Option<Pos2> {
+    (if cx.ptr.any_down { cx.ptr.origin } else { cx.ptr.pos }).filter(|p| cx.xf.rect.contains(*p) || on_handle(cx, view, *p, |_| true))
 }
 
 /// Whether `p` is on a resize handle of the selected comment, when it is a resizable `pick`.
