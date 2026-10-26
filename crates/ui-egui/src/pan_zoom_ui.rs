@@ -7,6 +7,7 @@
 //! slider adjusts the magnification level of the main document canvas.
 
 use egui::{Color32, CornerRadius, Pos2, Rect, Sense, Stroke, Vec2, pos2, vec2};
+use pdfcraft_engine::DocId;
 
 use crate::theme::Tokens;
 use crate::{PdfCraftApp, icons};
@@ -33,12 +34,14 @@ pub struct PanZoomState {
     pub viewport_size: Vec2,
     /// Current pointer drag interaction mode.
     pub drag_mode: PanZoomDrag,
+    /// Active document ID for which the drag state is valid.
+    pub active_doc: Option<DocId>,
 }
 
 impl PanZoomState {
     /// Creates a new Pan & Zoom window state for page `page`.
     pub fn new(page: usize) -> Self {
-        Self { page, open: true, viewport_size: vec2(240.0, 240.0), drag_mode: PanZoomDrag::None }
+        Self { page, open: true, viewport_size: vec2(240.0, 240.0), drag_mode: PanZoomDrag::None, active_doc: None }
     }
 }
 
@@ -53,6 +56,41 @@ enum PanZoomAction {
     SetZoom(f32),
     /// Navigate to a specific page index.
     GoToPage(usize),
+}
+
+/// Converts normalized displayed-page coordinates `(u, v)` to thumbnail-oriented coordinates.
+fn display_to_thumbnail(rotation: u16, u: f32, v: f32) -> (f32, f32) {
+    match rotation % 360 {
+        90 => (v, 1.0 - u),
+        180 => (1.0 - u, 1.0 - v),
+        270 => (1.0 - v, u),
+        _ => (u, v),
+    }
+}
+
+/// Converts normalized thumbnail-oriented coordinates `(u, v)` to displayed-page coordinates.
+fn thumbnail_to_display(rotation: u16, u: f32, v: f32) -> (f32, f32) {
+    match rotation % 360 {
+        90 => (1.0 - v, u),
+        180 => (1.0 - u, 1.0 - v),
+        270 => (v, 1.0 - u),
+        _ => (u, v),
+    }
+}
+
+/// Converts a normalized displayed-page rectangle `[u0, v0, u1, v1]` to a thumbnail-oriented rectangle.
+fn display_rect_to_thumbnail(rotation: u16, rect: [f32; 4]) -> [f32; 4] {
+    let corners = [
+        display_to_thumbnail(rotation, rect[0], rect[1]),
+        display_to_thumbnail(rotation, rect[2], rect[1]),
+        display_to_thumbnail(rotation, rect[0], rect[3]),
+        display_to_thumbnail(rotation, rect[2], rect[3]),
+    ];
+    let u0 = corners.iter().map(|p| p.0).fold(f32::INFINITY, f32::min);
+    let v0 = corners.iter().map(|p| p.1).fold(f32::INFINITY, f32::min);
+    let u1 = corners.iter().map(|p| p.0).fold(f32::NEG_INFINITY, f32::max);
+    let v1 = corners.iter().map(|p| p.1).fold(f32::NEG_INFINITY, f32::max);
+    [u0, v0, u1, v1]
 }
 
 /// Computes the normalized page viewport bounds `[u0, v0, u1, v1]` currently visible on screen.
@@ -114,13 +152,15 @@ pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
 
     let t = Tokens::get(ctx);
     let total_pages = doc.info.pages.len();
+    let document_changed = pan_zoom.active_doc != Some(view.id);
+    pan_zoom.active_doc = Some(view.id);
     pan_zoom.page = view.current.min(total_pages.saturating_sub(1));
     let page_idx = pan_zoom.page;
     let (pw, ph) = doc.info.pages.get(page_idx).map_or((612.0, 792.0), |p| (p.width, p.height));
 
     let mut is_open = pan_zoom.open;
     let mut action: Option<PanZoomAction> = None;
-    let mut next_drag_mode = pan_zoom.drag_mode;
+    let mut next_drag_mode = if document_changed { PanZoomDrag::None } else { pan_zoom.drag_mode };
 
     egui::Window::new(tl!("Pan & Zoom"))
         .id(egui::Id::unique("pan_zoom_overview_window"))
@@ -162,7 +202,8 @@ pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
             ui.painter().rect_stroke(thumb_rect, CornerRadius::same(2), Stroke::new(1.0, t.border), egui::StrokeKind::Outside);
 
             // Compute current viewport navigation box bounds on the thumbnail.
-            let [u0, v0, u1, v1] = page_viewport_fraction(view, page_idx, pw, ph);
+            let displayed = page_viewport_fraction(view, page_idx, pw, ph);
+            let [u0, v0, u1, v1] = display_rect_to_thumbnail(view.rotation, displayed);
             let nav_min = thumb_rect.min + vec2(u0 * thumb_rect.width(), v0 * thumb_rect.height());
             let nav_max = thumb_rect.min + vec2(u1 * thumb_rect.width(), v1 * thumb_rect.height());
             let nav_box = Rect::from_min_max(nav_min, nav_max);
@@ -211,13 +252,14 @@ pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
                         let dv = delta.y / thumb_rect.height().max(1.0);
                         let cu = ((u0 + u1) * 0.5 + du).clamp(0.0, 1.0);
                         let cv = ((v0 + v1) * 0.5 + dv).clamp(0.0, 1.0);
+                        let (cu, cv) = thumbnail_to_display(view.rotation, cu, cv);
                         action = Some(PanZoomAction::CenterFraction(page_idx, cu, cv));
                     }
                     PanZoomDrag::Handle => {
                         let delta = resp.drag_delta();
                         let cur_diag = (nav_box.width().powi(2) + nav_box.height().powi(2)).sqrt().max(1.0);
-                        let new_w = (nav_box.width() + delta.x).max(10.0);
-                        let new_h = (nav_box.height() + delta.y).max(10.0);
+                        let new_w = (nav_box.width() + delta.x).max(nav_box.width().min(10.0));
+                        let new_h = (nav_box.height() + delta.y).max(nav_box.height().min(10.0));
                         let new_diag = (new_w.powi(2) + new_h.powi(2)).sqrt().max(1.0);
                         let scale = cur_diag / new_diag;
                         let new_zoom = (view.zoom * scale).clamp(0.08, 64.0);
@@ -234,6 +276,7 @@ pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
             {
                 let u = ((pos.x - thumb_rect.min.x) / thumb_rect.width().max(1.0)).clamp(0.0, 1.0);
                 let v = ((pos.y - thumb_rect.min.y) / thumb_rect.height().max(1.0)).clamp(0.0, 1.0);
+                let (u, v) = thumbnail_to_display(view.rotation, u, v);
                 action = Some(PanZoomAction::CenterFraction(page_idx, u, v));
             }
 

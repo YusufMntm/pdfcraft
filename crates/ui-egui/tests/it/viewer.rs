@@ -2297,8 +2297,30 @@ fn pan_zoom_window_toggles_and_pans_and_zooms_document() {
     assert!(frac[0] >= 0.0 && frac[1] >= 0.0 && frac[2] <= 1.0 && frac[3] <= 1.0);
     assert!(frac[0] <= frac[2] && frac[1] <= frac[3]);
 
-    // Test centering view via center_on_fraction.
-    h.state_mut().views[i].center_on_fraction(0, 0.75, 0.25);
+    // Set high zoom so page is larger than viewport and test centering movement.
+    h.state_mut().views[i].zoom = 4.0;
+    h.state_mut().views[i].center_on_fraction(0, 0.1, 0.1);
+    h.run_steps(3);
+    let frac_before = pdfcraft_ui_egui::pan_zoom_ui::page_viewport_fraction(&h.state().views[i], 0, 612.0, 792.0);
+
+    h.state_mut().views[i].center_on_fraction(0, 0.9, 0.9);
+    h.run_steps(3);
+    let frac_after = pdfcraft_ui_egui::pan_zoom_ui::page_viewport_fraction(&h.state().views[i], 0, 612.0, 792.0);
+    assert!(frac_after[0] > frac_before[0] || frac_after[1] > frac_before[1]);
+
+    // Overview pointer interaction: click inside overview window.
+    h.event(egui::Event::PointerButton {
+        pos: egui::pos2(180.0, 200.0),
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: Default::default(),
+    });
+    h.event(egui::Event::PointerButton {
+        pos: egui::pos2(180.0, 200.0),
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: Default::default(),
+    });
     h.run_steps(3);
     assert_eq!(h.state().views[i].current, 0);
 
