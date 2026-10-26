@@ -700,11 +700,15 @@ fn hovering_create_button_opens_menu_with_three_options() {
         app.open_bytes("band.pdf", None, FIXTURE.to_vec()).unwrap();
     });
     let initial_combine_count = h.query_all_by_label("Combine files").count();
+    let initial_create_pdf_count = h.query_all_by_label("Create a PDF").count();
+    let initial_open_count = h.query_all_by_label_contains("Open").count();
     let create_btn = h.get_by_label("Create");
     let center = create_btn.rect().center();
     h.input_mut().events.push(egui::Event::PointerMoved(center));
     h.run_steps(3);
-    assert_eq!(h.query_all_by_label("Combine files").count(), initial_combine_count + 1, "menu opened on hover");
+    assert_eq!(h.query_all_by_label("Combine files").count(), initial_combine_count + 1, "menu opened on hover: Combine files");
+    assert_eq!(h.query_all_by_label("Create a PDF").count(), initial_create_pdf_count + 1, "menu opened on hover: Create a PDF");
+    assert_eq!(h.query_all_by_label_contains("Open").count(), initial_open_count + 1, "menu opened on hover: Open");
 }
 
 #[test]
