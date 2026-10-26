@@ -112,6 +112,7 @@ impl PdfCraftApp {
         }
     }
 
+    /// Run a registered command by id without the outer panic guard.
     fn execute_unguarded(&mut self, id: &str) -> bool {
         let Some(spec) = commands::command(id) else { return false };
         if !self.command_enabled(spec) {

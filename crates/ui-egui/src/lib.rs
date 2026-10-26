@@ -3737,6 +3737,7 @@ impl eframe::App for PdfCraftApp {
         self.sync_native_menu(ctx);
     }
 
+    /// Render the main window UI components, central canvas, dialogs, and floating tools.
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         i18n::set_current(i18n::Lang::from_pref(&self.language));
