@@ -1466,6 +1466,37 @@ fn list_box_shift_select_and_arrows_anchor_on_last_picked_row() {
     h.run_steps(3);
     assert_eq!(value(&h, "Choices"), ["C"], "ArrowDown from B moves to C");
 
+    // Click C, then Ctrl-click B twice (toggling B on then off): selection is [C] (index 2),
+    // while picked_row is 1. Repeated ArrowDown must still advance the anchor past C to D.
+    h.hover_at(p_c);
+    h.run_steps(1);
+    h.drag_at(p_c);
+    h.run_steps(1);
+    h.drop_at(p_c);
+    h.run_steps(3);
+    assert_eq!(value(&h, "Choices"), ["C"]);
+
+    for expected in [&["B", "C"][..], &["C"][..]] {
+        h.hover_at(p_b);
+        h.run_steps(1);
+        h.event(egui::Event::PointerMoved(p_b));
+        h.event(egui::Event::ModifiersChanged(egui::Modifiers::COMMAND));
+        h.event(egui::Event::PointerButton { pos: p_b, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::COMMAND });
+        h.run_steps(1);
+        h.event(egui::Event::PointerButton { pos: p_b, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::COMMAND });
+        h.event(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+        h.run_steps(3);
+        assert_eq!(value(&h, "Choices"), expected);
+    }
+
+    h.key_press(egui::Key::ArrowDown);
+    h.run_steps(3);
+    assert_eq!(value(&h, "Choices"), ["C"], "first ArrowDown advances anchor from B to C");
+
+    h.key_press(egui::Key::ArrowDown);
+    h.run_steps(3);
+    assert_eq!(value(&h, "Choices"), ["D"], "second ArrowDown advances from C to D");
+
     let _ = std::fs::remove_dir_all(&dir);
 }
 

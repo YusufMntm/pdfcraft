@@ -826,11 +826,13 @@ pub(crate) fn overlay(
             } else if (up || down) && !f.options.is_empty() {
                 let current_idx = view.forms.focus.as_ref().and_then(|x| x.picked_row).or_else(|| f.indices.last().copied()).unwrap_or(0);
                 let next_idx = if up { current_idx.saturating_sub(1) } else { (current_idx + 1).min(f.options.len().saturating_sub(1)) };
-                if (f.indices.as_slice() != [next_idx]) && next_idx < f.options.len() {
+                if next_idx < f.options.len() {
                     if let Some(fx) = view.forms.focus.as_mut() {
                         fx.picked_row = Some(next_idx);
                     }
-                    edit = Some(Edit::SetFieldValue { name: f.name.clone(), value: FieldValue::ChoiceIndices(vec![next_idx]) });
+                    if f.indices.as_slice() != [next_idx] {
+                        edit = Some(Edit::SetFieldValue { name: f.name.clone(), value: FieldValue::ChoiceIndices(vec![next_idx]) });
+                    }
                 }
             }
             let clicked_away = ctx.input(|i| i.pointer.any_click()) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| rect.contains(p));

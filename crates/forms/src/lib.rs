@@ -513,8 +513,7 @@ pub(crate) fn resolve_choice_indices(options: &[(String, String)], v: &[String],
         if multi { valid_raw_i } else { valid_raw_i.into_iter().take(1).collect() }
     } else {
         let mut derived = Vec::new();
-        let target_v = if multi { v } else { &v[..v.len().min(1)] };
-        for val in target_v {
+        for val in v.iter().take(if multi { v.len() } else { 1 }) {
             if let Some(pos) = options.iter().position(|(e, _)| e == val) {
                 if multi {
                     if !derived.contains(&pos) {
@@ -1198,12 +1197,13 @@ fn write_value(doc: &mut Document, f: &Field, value: &FieldValue, scripts: &mut 
             if picked_indices.len() > 1 && !multi {
                 return invalid(format!("{:?} takes a single value", f.name));
             }
+            let mut exports = Vec::with_capacity(picked_indices.len());
             for &idx in picked_indices {
-                if idx >= f.options.len() {
+                let Some((export, _)) = f.options.get(idx) else {
                     return invalid(format!("{:?} has no option at index {idx} (options: {})", f.name, f.options.len()));
-                }
+                };
+                exports.push(export.clone());
             }
-            let exports: Vec<String> = picked_indices.iter().map(|&i| f.options[i].0.clone()).collect();
             let mut sorted_indices = picked_indices.clone();
             sorted_indices.sort_unstable();
             let indices: Vec<Object> = sorted_indices.into_iter().map(|i| Object::Int(i as i64)).collect();
