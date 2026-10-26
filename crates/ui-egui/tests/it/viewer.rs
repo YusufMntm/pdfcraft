@@ -2268,3 +2268,37 @@ fn the_accessible_window_has_the_window_title_as_its_name() {
     assert_eq!(name(&h).as_deref(), Some("Quarterly report — PdfCraft"));
     assert_eq!(name(&h), Some(h.state().window_title.clone()));
 }
+
+/// View ▸ Show/Hide ▸ Rulers (`view.rulers`, `Ctrl+R` / `⌘R`):
+/// Toggles horizontal and vertical canvas rulers that track cursor position.
+#[test]
+fn rulers_toggle_and_track_cursor_position() {
+    use egui::{Key, Modifiers};
+    let mut h = harness();
+    h.state_mut().active = Some(0);
+    h.run_steps(4);
+
+    // Rulers start disabled.
+    assert!(!h.state().show_rulers, "rulers should start hidden");
+
+    // Execute view.rulers command.
+    assert!(h.state_mut().execute("view.rulers"));
+    h.run_steps(2);
+    assert!(h.state().show_rulers, "rulers should be shown after execute('view.rulers')");
+
+    // Check option setting via control interface.
+    h.state_mut().set_option("rulers", "off").unwrap();
+    assert!(!h.state().show_rulers, "set_option('rulers', 'off') turns rulers off");
+
+    h.state_mut().set_option("rulers", "on").unwrap();
+    assert!(h.state().show_rulers, "set_option('rulers', 'on') turns rulers on");
+
+    // Toggle by shortcut Ctrl+R / Cmd+R.
+    h.key_press_modifiers(Modifiers::COMMAND, Key::R);
+    h.run_steps(2);
+    assert!(!h.state().show_rulers, "Ctrl+R toggles rulers off");
+
+    h.key_press_modifiers(Modifiers::COMMAND, Key::R);
+    h.run_steps(2);
+    assert!(h.state().show_rulers, "Ctrl+R toggles rulers back on");
+}
