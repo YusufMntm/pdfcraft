@@ -1,8 +1,8 @@
-//! View ▸ Zoom ▸ Pan & Zoom: a floating, movable overview window that displays
-//! a miniature of the active document page with a red viewport frame representing
+//! View ▸ Zoom ▸ Pan & zoom: a floating, movable overview window that displays
+//! a miniature of the active document page with an accent viewport frame representing
 //! the visible area of the canvas.
 //!
-//! Dragging the red viewport frame or clicking anywhere on the miniature overview
+//! Dragging the accent viewport frame or clicking anywhere on the miniature overview
 //! pans the main document in real time. Dragging the resize handle or using the zoom
 //! slider adjusts the magnification level of the main document canvas.
 
@@ -17,7 +17,7 @@ use crate::{PdfCraftApp, icons};
 pub enum PanZoomDrag {
     /// No pointer drag is currently in progress.
     None,
-    /// Dragging the red navigation viewport frame to pan the document view.
+    /// Dragging the navigation viewport frame to pan the document view.
     Box,
     /// Dragging the bottom-right corner handle to resize the viewport and adjust zoom.
     Handle,
@@ -162,7 +162,7 @@ pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
     let mut action: Option<PanZoomAction> = None;
     let mut next_drag_mode = if document_changed { PanZoomDrag::None } else { pan_zoom.drag_mode };
 
-    egui::Window::new(tl!("Pan & Zoom"))
+    egui::Window::new(tl!("Pan & zoom"))
         .id(egui::Id::unique("pan_zoom_overview_window"))
         .open(&mut is_open)
         .collapsible(false)
@@ -208,15 +208,15 @@ pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
             let nav_max = thumb_rect.min + vec2(u1 * thumb_rect.width(), v1 * thumb_rect.height());
             let nav_box = Rect::from_min_max(nav_min, nav_max);
 
-            // Paint red navigation viewport box.
-            let red = Color32::from_rgb(225, 29, 72);
-            let red_wash = Color32::from_rgba_unmultiplied(225, 29, 72, 35);
-            ui.painter().rect_filled(nav_box, CornerRadius::ZERO, red_wash);
-            ui.painter().rect_stroke(nav_box, CornerRadius::ZERO, Stroke::new(1.5, red), egui::StrokeKind::Inside);
+            // Paint navigation viewport box with theme accent.
+            let frame_color = t.accent;
+            let frame_wash = t.accent_soft.gamma_multiply(0.40);
+            ui.painter().rect_filled(nav_box, CornerRadius::ZERO, frame_wash);
+            ui.painter().rect_stroke(nav_box, CornerRadius::ZERO, Stroke::new(1.5, frame_color), egui::StrokeKind::Inside);
 
             // Corner resize handle at bottom-right of the viewport box.
             let handle_rect = Rect::from_center_size(nav_box.max, vec2(8.0, 8.0));
-            ui.painter().rect_filled(handle_rect, CornerRadius::same(1), red);
+            ui.painter().rect_filled(handle_rect, CornerRadius::same(1), frame_color);
 
             // Pointer cursor styling and interaction handling.
             let pointer_pos = resp.interact_pointer_pos();

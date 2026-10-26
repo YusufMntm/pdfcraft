@@ -2269,7 +2269,7 @@ fn the_accessible_window_has_the_window_title_as_its_name() {
     assert_eq!(name(&h), Some(h.state().window_title.clone()));
 }
 
-/// View ▸ Zoom ▸ Pan & Zoom: toggles the floating Pan & Zoom overview window,
+/// View ▸ Zoom ▸ Pan & zoom: toggles the floating Pan & zoom overview window,
 /// updates view position via normalized fraction centering, adjusts magnification factor,
 /// and resets when closed or toggled off.
 #[test]
@@ -2334,11 +2334,11 @@ fn pan_zoom_window_toggles_and_pans_and_zooms_document() {
     let after_out = h.state().views[i].zoom;
     assert!(after_out < after_in);
 
-    // Test Turkish localization for Pan & Zoom.
+    // Test Turkish localization for Pan & zoom.
     h.state_mut().set_option("language", "tr").unwrap();
     h.run_steps(2);
     let lang = pdfcraft_ui_egui::i18n::Lang::from_code("tr").unwrap();
-    assert_eq!(pdfcraft_ui_egui::i18n::tr(lang, "Pan & Zoom"), "Kaydır ve Yakınlaştır");
+    assert_eq!(pdfcraft_ui_egui::i18n::tr(lang, "Pan & zoom"), "Kaydır ve yakınlaştır");
 
     // Toggle off via command.
     assert!(h.state_mut().execute("view.pan_zoom"));
