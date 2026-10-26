@@ -813,7 +813,8 @@ pub(crate) fn resized(r: Rect, (hx, hy): (i8, i8), d: egui::Vec2, aspect_ratio: 
 pub(crate) fn page_input(ui: &egui::Ui, resp: &egui::Response, cx: &PageCx<'_>, view: &mut DocView) -> bool {
     let (pointer, origin) = (cx.ptr.pos, cx.ptr.origin);
     let page_rect = cx.xf.rect;
-    let pressed_here = origin.is_some_and(|o| page_rect.contains(o) || on_handle(cx, view, o, |_| true));
+    let pressed_here = origin.is_some_and(|o| page_rect.contains(o));
+    let handle_pressed_here = origin.is_some_and(|o| page_rect.contains(o) || on_handle(cx, view, o, |_| true));
     let over_page = pointer.is_some_and(|p| page_rect.contains(p));
     let fill_grab = fill_grabs(cx, view);
     let draw_grab = draw_grabs(cx, view);
@@ -836,7 +837,7 @@ pub(crate) fn page_input(ui: &egui::Ui, resp: &egui::Response, cx: &PageCx<'_>, 
     match cx.tool {
         // The shape just drawn is selected with its handles showing: they resize it without a
         // trip to the Select tool (#2338). Anywhere else the tool keeps drawing.
-        QuickTool::Comment(_) if draw_grab => select_input(ui, resp, cx, view, pointer, origin, pressed_here),
+        QuickTool::Comment(_) if draw_grab => select_input(ui, resp, cx, view, pointer, origin, handle_pressed_here),
         QuickTool::Comment(tool) if tool.draws() => {
             if !cx.allowed {
                 return false;
@@ -1074,8 +1075,8 @@ pub(crate) fn page_input(ui: &egui::Ui, resp: &egui::Response, cx: &PageCx<'_>, 
             }
             true
         }
-        QuickTool::Select => select_input(ui, resp, cx, view, pointer, origin, pressed_here),
-        QuickTool::Fill(_) if fill_grab => select_input(ui, resp, cx, view, pointer, origin, pressed_here),
+        QuickTool::Select => select_input(ui, resp, cx, view, pointer, origin, handle_pressed_here),
+        QuickTool::Fill(_) if fill_grab => select_input(ui, resp, cx, view, pointer, origin, handle_pressed_here),
         _ => false,
     }
 }
