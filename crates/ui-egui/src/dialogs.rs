@@ -9,6 +9,7 @@ use crate::{CloseRequest, Dialog, PdfCraftApp, PropsTab, panels::human_size, wid
 
 const INFO_KEYS: [&str; 4] = ["Title", "Author", "Subject", "Keywords"];
 
+/// Shows active modal dialogs, overview windows, and security unlock prompts.
 pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
     // The page sets hover cursors from the raw pointer position (form fields, links, comments)
     // before any dialog is drawn, and nothing under a modal's backdrop takes clicks. Start from
