@@ -612,6 +612,7 @@ pub struct UnlockPrompt {
 }
 
 impl UnlockPrompt {
+    /// Create a prompt asking for `doc`'s permissions password before running `then`.
     pub(crate) fn new(doc: &pdfcraft_engine::Document, then: Option<&'static str>) -> Self {
         Self { doc: doc.id, name: doc.name.clone(), input: String::new(), error: None, then }
     }
@@ -1532,6 +1533,7 @@ impl PdfCraftApp {
         }
     }
 
+    /// Prepare `bytes` with `password` (or open a password prompt if needed) and commit the tab.
     fn try_open(
         &mut self,
         name: &str,
@@ -1665,6 +1667,7 @@ impl PdfCraftApp {
         self.recent.truncate(12);
     }
 
+    /// Open a file dropped onto the application window, by path when absolute or by its bytes.
     #[cfg(not(target_arch = "wasm32"))]
     fn open_dropped(&mut self, f: egui::DroppedFileHandle, _ctx: &egui::Context) {
         let p = f.path().to_string_lossy().into_owned();
@@ -2733,9 +2736,10 @@ impl PdfCraftApp {
             self.organize_zoom = zoom.clamp(*canvas::GRID_ZOOM_RANGE.start(), *canvas::GRID_ZOOM_RANGE.end());
         }
         if let Ok(r) = serde_json::from_value::<Vec<RecentFile>>(v["recent"].clone()) {
-            // Only keep entries whose files still exist, and keep pinned files at the top.
+            // Keep pinned entries (whose volume or synced drive may be offline at startup) and
+            // unpinned entries whose files still exist, sorted with pinned files first.
             #[cfg(not(target_arch = "wasm32"))]
-            let mut r: Vec<RecentFile> = r.into_iter().filter(|f| std::path::Path::new(&f.path).exists()).collect();
+            let mut r: Vec<RecentFile> = r.into_iter().filter(|f| f.pinned || std::path::Path::new(&f.path).exists()).collect();
             #[cfg(target_arch = "wasm32")]
             let mut r = r;
             r.sort_by_key(|f| !f.pinned);
