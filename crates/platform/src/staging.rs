@@ -16,6 +16,15 @@ pub enum StagingName {
     TagThenSuffix,
 }
 
+/// Whether `path` is a Windows network/UNC path (#5001).
+///
+/// On Windows SMB shares, dotfiles are often automatically hidden by server configurations,
+/// which can hide the target directory or file after an atomic rename.
+pub fn is_network_path(path: &Path) -> bool {
+    let s = path.to_string_lossy();
+    s.starts_with(r"\\") || s.starts_with("//") || s.starts_with(r"\\?\UNC\")
+}
+
 /// Create a new, empty staging file in `dir` for the file `name`, one name per suffix. It is
 /// opened with `create_new`, which fails if anything already has the name (a file, a hard link,
 /// a symbolic link even when dangling, a folder), on Windows as everywhere else; such a name is
@@ -52,10 +61,13 @@ fn create_staging_as(
         }
         stem.push(c);
     }
+    let is_unc = is_network_path(dir);
     for suffix in suffixes.into_iter().take(STAGING_ATTEMPTS) {
-        let tmp = dir.join(match form {
-            StagingName::SuffixThenTag => format!(".{stem}.{suffix:016x}.pdfcraft-tmp"),
-            StagingName::TagThenSuffix => format!(".{stem}.pdfcraft-{suffix:016x}.tmp"),
+        let tmp = dir.join(match (is_unc, form) {
+            (true, StagingName::SuffixThenTag) => format!("{stem}.{suffix:016x}.pdfcraft-tmp"),
+            (true, StagingName::TagThenSuffix) => format!("{stem}.pdfcraft-{suffix:016x}.tmp"),
+            (false, StagingName::SuffixThenTag) => format!(".{stem}.{suffix:016x}.pdfcraft-tmp"),
+            (false, StagingName::TagThenSuffix) => format!(".{stem}.pdfcraft-{suffix:016x}.tmp"),
         });
         let mut options = std::fs::OpenOptions::new();
         options.write(true).create_new(true);
@@ -68,7 +80,14 @@ fn create_staging_as(
         #[cfg(windows)]
         if let Some(keep) = keep {
             use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
-            options.attributes(keep.file_attributes() & KEPT_ATTRIBUTES);
+            let mut attrs = keep.file_attributes() & KEPT_ATTRIBUTES;
+            // On network shares (UNC), do not propagate hidden/system flags (#5001).
+            if is_unc {
+                attrs &= !KEPT_ATTRIBUTES;
+            }
+            if attrs != 0 {
+                options.attributes(attrs);
+            }
         }
         match options.open(&tmp) {
             Ok(file) => {
