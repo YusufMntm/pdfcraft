@@ -2658,9 +2658,9 @@ fn text_comments_can_save_a_zero_width_default() {
     assert_eq!(restored.comment_prefs.style(CommentTool::Callout).width, 0.0);
 }
 
-/// #4827: A comment or text box placed near the edge of a page can have its resize handles
+/// #4825 (and #4827): A comment or text box placed near the edge of a page can have its resize handles
 /// extend slightly outside the page boundary. Dragging an off-page handle must be recognized,
-/// entering `Gesture::Resize` and updating the comment's size.
+/// entering `Gesture::Resize` and updating the comment's size, while starting a new drawing off-page remains blocked.
 #[test]
 fn off_page_resize_handle_is_selectable_and_resizes() {
     use pdfcraft_engine::{Edit, NewAnnotation, Shape};
@@ -2709,4 +2709,19 @@ fn off_page_resize_handle_is_selectable_and_resizes() {
     let after_rect = c[0].rect;
     assert!(after_rect[0] > 0.0, "left edge moved inward: {after_rect:?}");
     assert_eq!(h.state().session.get(h.state().views[0].id).unwrap().can_undo(), Some("Resize comment"));
+
+    // Verify that drawing a new shape starting off-page does not begin a drag or create a comment.
+    let mut h_draw = harness(|app| app.set_option("quick", "square").unwrap());
+    let page_rect_draw = h_draw.state().views[0].page_screen_rect(0).expect("page 1 on screen");
+    let off_page_draw = pos2(page_rect_draw.left() - 4.0, page_rect_draw.top() + 50.0);
+    h_draw.hover_at(off_page_draw);
+    h_draw.run_steps(1);
+    h_draw.drag_at(off_page_draw);
+    h_draw.run_steps(1);
+    h_draw.hover_at(pos2(page_rect_draw.left() + 40.0, page_rect_draw.top() + 50.0));
+    h_draw.run_steps(1);
+    assert!(h_draw.state().views[0].comments.gesture.is_none(), "off-page drag does not start a new drawing");
+    h_draw.drop_at(pos2(page_rect_draw.left() + 40.0, page_rect_draw.top() + 50.0));
+    h_draw.run_steps(2);
+    assert_eq!(comments(&h_draw).len(), 0, "no comment created from off-page press");
 }
