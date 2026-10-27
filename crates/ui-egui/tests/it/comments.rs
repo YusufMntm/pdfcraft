@@ -2658,7 +2658,7 @@ fn text_comments_can_save_a_zero_width_default() {
     assert_eq!(restored.comment_prefs.style(CommentTool::Callout).width, 0.0);
 }
 
-/// #4825 (and #4827): A comment or text box placed near the edge of a page can have its resize handles
+/// #4825: A comment or text box placed near the edge of a page can have its resize handles
 /// extend slightly outside the page boundary. Dragging an off-page handle must be recognized,
 /// entering `Gesture::Resize` and updating the comment's size, while starting a new drawing off-page remains blocked.
 #[test]
