@@ -455,10 +455,8 @@ fn select_input(
             && !resp.double_clicked()
             && pointer
                 .is_some_and(|p| cx.info.links.iter().any(|link| link.page == cx.page && cx.xf.user_rect(cx.info, cx.page, link.rect).contains(p)));
-        match pointer
-            .and_then(|p| cx.hit(p))
-            .or_else(|| selected.filter(|_| pointer.is_some_and(|p| handle_at(p).is_some() || point_at(p).is_some())))
-        {
+        let handle_hit = selected.filter(|_| pointer.is_some_and(|p| handle_at(p).is_some() || point_at(p).is_some()));
+        match handle_hit.or_else(|| pointer.and_then(|p| cx.hit(p))) {
             Some(a) if a.subtype == "Highlight" && follow_link => {
                 // A plain click follows the link beneath text highlighting. Keep other
                 // annotations and active gestures in control of their own input.
