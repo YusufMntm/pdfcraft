@@ -470,19 +470,34 @@ fn network_paths_avoid_leading_dot_in_staging_names() {
     let is_unc = is_network_path(dir);
     assert!(is_unc);
     let suffix = 0x42u64;
-    let name_suffix_tag = if is_unc {
-        format!("{name}.{suffix:016x}.pdfcraft-tmp")
-    } else {
-        format!(".{name}.{suffix:016x}.pdfcraft-tmp")
-    };
+    let name_suffix_tag = if is_unc { format!("{name}.{suffix:016x}.pdfcraft-tmp") } else { format!(".{name}.{suffix:016x}.pdfcraft-tmp") };
     assert!(!name_suffix_tag.starts_with('.'));
     assert_eq!(name_suffix_tag, "document.pdf.0000000000000042.pdfcraft-tmp");
 
-    let name_tag_suffix = if is_unc {
-        format!("{name}.pdfcraft-{suffix:016x}.tmp")
-    } else {
-        format!(".{name}.pdfcraft-{suffix:016x}.tmp")
-    };
+    let name_tag_suffix = if is_unc { format!("{name}.pdfcraft-{suffix:016x}.tmp") } else { format!(".{name}.pdfcraft-{suffix:016x}.tmp") };
     assert!(!name_tag_suffix.starts_with('.'));
     assert_eq!(name_tag_suffix, "document.pdf.pdfcraft-0000000000000042.tmp");
+}
+
+/// #5001: mapped network drive destinations avoid dot-prefixed staging names and do not apply hidden/system flags.
+#[test]
+fn mapped_network_drives_avoid_leading_dot_and_hidden_attributes() {
+    set_simulated_mapped_drive_for_test(r"Z:\");
+    let mapped_dir = Path::new(r"Z:\documents");
+    assert!(is_network_path(mapped_dir));
+    assert!(is_network_path(Path::new(r"Z:\documents\contract.pdf")));
+
+    let is_unc = is_network_path(mapped_dir);
+    assert!(is_unc);
+    let suffix = 0x99u64;
+    let name = "contract.pdf";
+    let name_suffix_tag = if is_unc { format!("{name}.{suffix:016x}.pdfcraft-tmp") } else { format!(".{name}.{suffix:016x}.pdfcraft-tmp") };
+    assert!(!name_suffix_tag.starts_with('.'));
+    assert_eq!(name_suffix_tag, "contract.pdf.0000000000000099.pdfcraft-tmp");
+
+    let name_tag_suffix = if is_unc { format!("{name}.pdfcraft-{suffix:016x}.tmp") } else { format!(".{name}.pdfcraft-{suffix:016x}.tmp") };
+    assert!(!name_tag_suffix.starts_with('.'));
+    assert_eq!(name_tag_suffix, "contract.pdf.pdfcraft-0000000000000099.tmp");
+
+    clear_simulated_mapped_drives_for_test();
 }
