@@ -1916,7 +1916,16 @@ fn dest_indicator_rect_covers_each_destination_view() {
     let fitr = v.dest_indicator_rect(0, DestView::FitR { rect: [60.0, 100.0, 150.0, 300.0] }, &info).expect("fitr rect");
     assert!((fitr[0] - 0.2).abs() < 1e-4 && (fitr[1] - 0.25).abs() < 1e-4 && (fitr[2] - 0.5).abs() < 1e-4 && (fitr[3] - 0.75).abs() < 1e-4);
 
-    assert!(v.dest_indicator_rect(5, DestView::Top, &info).is_none());
+    // Quarter-turn rotation swaps the displayed axis for FitH and FitV.
+    let mut rotated = v;
+    rotated.rotation = 90;
+    let fith_rot = rotated.dest_indicator_rect(0, DestView::FitH { top: Some(300.0) }, &info).expect("rotated fith rect");
+    assert!((fith_rot[0] - 0.75).abs() < 1e-4 && (fith_rot[1] - 0.0).abs() < 1e-4 && (fith_rot[3] - 1.0).abs() < 1e-4);
+
+    let fitv_rot = rotated.dest_indicator_rect(0, DestView::FitV { left: Some(75.0) }, &info).expect("rotated fitv rect");
+    assert!((fitv_rot[0] - 0.0).abs() < 1e-4 && (fitv_rot[1] - 0.25).abs() < 1e-4 && (fitv_rot[2] - 1.0).abs() < 1e-4);
+
+    assert!(rotated.dest_indicator_rect(5, DestView::Top, &info).is_none());
 }
 
 #[test]

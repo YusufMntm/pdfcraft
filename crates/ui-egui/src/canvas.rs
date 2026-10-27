@@ -821,20 +821,23 @@ impl DocView {
         let band_x = (24.0 / dw).clamp(0.02, 0.3);
         let band_y = (24.0 / dh).clamp(0.02, 0.3);
         let point = |x: Option<f32>, y: Option<f32>| p.dest_fraction(x, y, self.rotation);
+        // The destination coordinate lands on one displayed axis only; a quarter turn swaps it.
+        let band = |[fx, fy]: [Option<f32>; 2], default_vertical: bool| match (fx, fy) {
+            (Some(x), _) => {
+                let x1 = (x + band_x).min(1.0);
+                [(x1 - band_x).max(0.0), 0.0, x1, 1.0]
+            }
+            (None, Some(y)) => {
+                let y1 = (y + band_y).min(1.0);
+                [0.0, (y1 - band_y).max(0.0), 1.0, y1]
+            }
+            (None, None) if default_vertical => [0.0, 0.0, band_x, 1.0],
+            (None, None) => [0.0, 0.0, 1.0, band_y],
+        };
         let rect = match dest {
             DestView::Top | DestView::Fit => [0.0, 0.0, 1.0, band_y],
-            DestView::FitH { top } => {
-                let fy = point(None, top)[1].unwrap_or(0.0);
-                let y1 = (fy + band_y).min(1.0);
-                let y0 = (y1 - band_y).max(0.0);
-                [0.0, y0, 1.0, y1]
-            }
-            DestView::FitV { left } => {
-                let fx = point(left, None)[0].unwrap_or(0.0);
-                let x1 = (fx + band_x).min(1.0);
-                let x0 = (x1 - band_x).max(0.0);
-                [x0, 0.0, x1, 1.0]
-            }
+            DestView::FitH { top } => band(point(None, top), (u32::from(p.rotation) + u32::from(self.rotation)) % 180 == 90),
+            DestView::FitV { left } => band(point(left, None), (u32::from(p.rotation) + u32::from(self.rotation)).is_multiple_of(180)),
             DestView::Xyz { left, top, .. } => {
                 let [fx, fy] = point(left, top);
                 let (x0, x1) = match fx {
