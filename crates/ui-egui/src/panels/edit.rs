@@ -323,8 +323,9 @@ fn format_section(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens) {
     match selected {
         Some((page, index, text)) => {
             let mut style = text.clone();
+            let prev_style = style.clone();
             added_text_format(app, ui, t, page, &mut style);
-            if style != text {
+            if style != prev_style {
                 // The reusable style follows the selection only when the edit took, so a refused one adds nothing odd later.
                 if app.apply_edit(pdfcraft_engine::Edit::UpdateContent { page, index, content: pdfcraft_engine::AddedContent::Text(style.clone()) }) {
                     app.text_style = pdfcraft_engine::AddedText { text: String::new(), rect: [0.0; 4], ..style };
@@ -334,8 +335,9 @@ fn format_section(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens) {
         None => {
             let active_draft = app.active_ids().and_then(|(i, _)| app.views[i].content.draft.as_ref().map(|d| (i, d.page, d.style.clone())));
             if let Some((view_idx, page, mut style)) = active_draft {
+                let prev_draft_style = style.clone();
                 added_text_format(app, ui, t, page, &mut style);
-                if style != app.views[view_idx].content.draft.as_ref().map(|d| &d.style).cloned().unwrap_or_default() {
+                if style != prev_draft_style {
                     if let Some(draft) = app.views[view_idx].content.draft.as_mut() {
                         draft.style = style.clone();
                     }
@@ -346,6 +348,9 @@ fn format_section(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens) {
                 let mut style = app.text_style.clone();
                 let page = app.active_ids().map(|(i, _)| app.views[i].current).unwrap_or(0);
                 added_text_format(app, ui, t, page, &mut style);
+                if style.font_resource.is_none() && app.text_style.font_resource.is_some() {
+                    style.font_resource = app.text_style.font_resource.clone();
+                }
                 app.text_style = style;
             }
         }
@@ -387,6 +392,9 @@ fn added_text_format(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens, page:
         #[cfg(not(target_arch = "wasm32"))]
         Some(crate::format_text_ui::FontChoice::Installed(path)) => {
             app.use_paths(crate::files::FilePurpose::TextFont { page }, &[path]);
+            if let Some(r) = &app.text_style.font_resource {
+                style.font_resource = Some(r.clone());
+            }
         }
         #[cfg(target_arch = "wasm32")]
         Some(crate::format_text_ui::FontChoice::Installed(_)) => {}
