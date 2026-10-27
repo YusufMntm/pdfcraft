@@ -3,12 +3,14 @@ use super::layout::{first_undrawable, is_thai, nums, shaped_arabic, thai_error};
 use super::types::{Added, AddedImage, AddedText, Align, CHAR_SPACING_LIMIT, Family, MarkerScan, TAG};
 use super::*;
 
+/// Parses an added item dictionary (`/PCAdded`) into [`Content`].
 fn parse(doc: &Document, d: &Dict) -> Option<Content> {
     let r = nums(doc, d.get(b"Rect"));
     let rect: [f64; 4] = r.try_into().ok()?;
     match d.name(b"Kind")? {
         b"Text" => {
             let (family, bold, italic) = Family::from_base(d.name(b"Font").unwrap_or(b"Helvetica"));
+            let font_resource = d.name(b"FontResource").map(|n| String::from_utf8_lossy(n).into_owned());
             let c = nums(doc, d.get(b"Color"));
             Some(Content::Text(AddedText {
                 rect,
@@ -26,6 +28,7 @@ fn parse(doc: &Document, d: &Dict) -> Option<Content> {
                 },
                 // Items written before character spacing have none.
                 char_spacing: d.get(b"CharSpacing").and_then(Object::as_f64).filter(|v| v.is_finite()).unwrap_or(0.0),
+                font_resource,
             }))
         }
         b"Image" => {
