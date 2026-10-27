@@ -348,9 +348,6 @@ fn format_section(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens) {
                 let mut style = app.text_style.clone();
                 let page = app.active_ids().map(|(i, _)| app.views[i].current).unwrap_or(0);
                 added_text_format(app, ui, t, page, &mut style);
-                if style.font_resource.is_none() && app.text_style.font_resource.is_some() {
-                    style.font_resource = app.text_style.font_resource.clone();
-                }
                 app.text_style = style;
             }
         }
